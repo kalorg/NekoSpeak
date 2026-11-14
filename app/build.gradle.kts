@@ -45,15 +45,17 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = "nekospeak123"
+            storeType = "PKCS12"
+            storePassword = "N3k0Kalorg!2026Spk"
             keyAlias = "nekospeak"
-            keyPassword = "nekospeak123"
+            keyPassword = "N3k0Kalorg!2026Spk"
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
