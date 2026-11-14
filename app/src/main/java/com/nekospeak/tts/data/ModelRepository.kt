@@ -226,6 +226,12 @@ object ModelRepository {
                             onError("Redirection sans en-tête Location pour: $currentUrl")
                             return false
                         }
+                        // Sécurité: n'accepter que les redirections http(s)
+                        if (!newUrl.startsWith("http")) {
+                            Log.e(TAG, "Refusing redirect with non-http scheme: $newUrl")
+                            onError("Redirection refusée (schéma non http): $newUrl")
+                            return false
+                        }
                         Log.d(TAG, "Redirecting to: $newUrl")
                         currentUrl = newUrl
                         connection.disconnect()
