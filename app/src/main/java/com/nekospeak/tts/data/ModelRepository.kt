@@ -32,7 +32,7 @@ object ModelRepository {
     // URLs from KevinAHM's pocket-tts-onnx HF repo (per-language bundles) and official tts-voices
     // Note: all five ONNX models available as INT8 in the bundle
     private const val HF_BASE = "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/main"
-    private const val BUNDLE = "onnx/english_2026-04"
+    private const val BUNDLE = "onnx/french_24l"
     private const val VOICES_BASE = "https://huggingface.co/kyutai/tts-voices/resolve/main"
     
     val models = listOf(
