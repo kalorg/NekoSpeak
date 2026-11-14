@@ -31,11 +31,11 @@ data class ModelInfo(
 
 object ModelRepository {
     private const val TAG = "ModelRepository"
-    
+
     private const val HF_BASE = "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/main"
     private const val BUNDLE = "onnx/french_24l"
     private const val VOICES_BASE = "https://huggingface.co/kyutai/tts-voices/resolve/main"
-    
+
     val models = listOf(
         ModelInfo(
             id = "pocket_v1",
@@ -95,9 +95,9 @@ object ModelRepository {
             )
         )
     )
-    
+
     private val _downloadStates = mutableMapOf<String, MutableStateFlow<Float>>()
-    
+
     // Permet à l'UI d'observer le dernier message d'erreur détaillé
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
@@ -120,3 +120,170 @@ object ModelRepository {
      * pour pouvoir les récupérer même sans ADB ni Logcat.
      */
     private fun logErrorToFile(context: Context, message: String) {
+        try {
+            val logFile = File(context.filesDir, "download_errors.log")
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+            FileOutputStream(logFile, true).use { output ->
+                output.write("[$timestamp] $message\n".toByteArray(Charsets.UTF_8))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Impossible d'écrire dans download_errors.log", e)
+        }
+    }
+
+    suspend fun downloadModel(context: Context, modelId: String, onComplete: (Boolean) -> Unit) = withContext(Dispatchers.IO) {
+        val model = models.find { it.id == modelId } ?: return@withContext
+
+        if (_downloadStates.containsKey(modelId)) return@withContext // Already downloading
+
+        val progressFlow = MutableStateFlow(0f)
+        _downloadStates[modelId] = progressFlow
+
+        try {
+            val totalFiles = model.files.size
+            var filesDownloaded = 0
+
+            for (fileDef in model.files) {
+                val targetFile = File(context.filesDir, fileDef.fileName)
+
+                // Skip if already downloaded and valid
+                if (targetFile.exists() && targetFile.length() > 1024) {
+                    Log.d(TAG, "File already exists: ${fileDef.fileName}")
+                    filesDownloaded++
+                    progressFlow.value = filesDownloaded.toFloat() / totalFiles
+                    continue
+                }
+
+                // Create parent directories
+                targetFile.parentFile?.mkdirs()
+
+                Log.i(TAG, "Downloading: ${fileDef.downloadUrl}")
+
+                val success = downloadFile(fileDef.downloadUrl, targetFile, { fileProgress ->
+                    val totalProgress = (filesDownloaded + fileProgress) / totalFiles
+                    progressFlow.value = totalProgress
+                }) { errorMessage ->
+                    // Trace l'URL exacte en échec dans download_errors.log et pour l'UI
+                    val msg = "Échec du fichier: ${fileDef.fileName}\nURL: ${fileDef.downloadUrl}\n$errorMessage"
+                    _lastError.value = msg
+                    logErrorToFile(context, msg)
+                }
+
+                if (!success) {
+                    Log.e(TAG, "Failed to download: ${fileDef.fileName}")
+                    withContext(Dispatchers.Main) { onComplete(false) }
+                    return@withContext
+                }
+
+                filesDownloaded++
+                Log.i(TAG, "Downloaded: ${fileDef.fileName} (${targetFile.length() / 1024}KB)")
+            }
+
+            Log.i(TAG, "Model $modelId download complete")
+            _lastError.value = null
+            withContext(Dispatchers.Main) { onComplete(true) }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Download failed for $modelId", e)
+            e.printStackTrace()
+            val msg = "Erreur inattendue pour $modelId: ${e.message}"
+            _lastError.value = msg
+            logErrorToFile(context, msg)
+            withContext(Dispatchers.Main) { onComplete(false) }
+        } finally {
+            _downloadStates.remove(modelId)
+        }
+    }
+
+    private fun downloadFile(urlString: String, targetFile: File, onProgress: (Float) -> Unit, onError: (String) -> Unit): Boolean {
+        var connection: HttpURLConnection? = null
+        try {
+            var currentUrl = urlString
+            var redirectCount = 0
+            val maxRedirects = 5
+
+            // Handle redirects manually (HuggingFace uses them for LFS files)
+            while (redirectCount < maxRedirects) {
+                val url = URL(currentUrl)
+                connection = url.openConnection() as HttpURLConnection
+                connection.connectTimeout = 30000
+                connection.readTimeout = 120000  // 2 min timeout for large files
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("User-Agent", "NekoSpeak-TTS/1.0")
+                connection.instanceFollowRedirects = false  // Handle redirects manually
+
+                val responseCode = connection.responseCode
+                Log.d(TAG, "Response code for $currentUrl: $responseCode")
+
+                when (responseCode) {
+                    HttpURLConnection.HTTP_OK -> break  // Success, proceed to download
+                    HttpURLConnection.HTTP_MOVED_TEMP, HttpURLConnection.HTTP_MOVED_PERM,
+                    HttpURLConnection.HTTP_SEE_OTHER, 307, 308 -> {
+                        // Follow redirect
+                        val newUrl = connection.getHeaderField("Location")
+                        if (newUrl == null) {
+                            Log.e(TAG, "Redirect without Location header")
+                            onError("Redirection sans en-tête Location pour: $currentUrl")
+                            return false
+                        }
+                        Log.d(TAG, "Redirecting to: $newUrl")
+                        currentUrl = newUrl
+                        connection.disconnect()
+                        redirectCount++
+                    }
+                    else -> {
+                        Log.e(TAG, "HTTP error: $responseCode for $urlString")
+                        onError("Erreur HTTP $responseCode pour: $urlString")
+                        return false
+                    }
+                }
+            }
+
+            if (redirectCount >= maxRedirects) {
+                Log.e(TAG, "Too many redirects for $urlString")
+                onError("Trop de redirections pour: $urlString")
+                return false
+            }
+
+            val contentLength = connection!!.contentLengthLong
+            Log.d(TAG, "Content length: $contentLength bytes")
+
+            var bytesDownloaded = 0L
+
+            connection.inputStream.use { input ->
+                FileOutputStream(targetFile).use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        bytesDownloaded += bytesRead
+
+                        if (contentLength > 0) {
+                            onProgress(bytesDownloaded.toFloat() / contentLength)
+                        }
+                    }
+                }
+            }
+
+            Log.i(TAG, "Downloaded ${bytesDownloaded / 1024}KB to ${targetFile.name}")
+            return true
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Download error: ${e.message}", e)
+            onError("Exception: ${e.message}")
+            targetFile.delete() // Clean up partial download
+            return false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    fun deleteModel(context: Context, modelId: String) {
+        val model = models.find { it.id == modelId } ?: return
+        model.files.forEach { fileDef ->
+             val file = File(context.filesDir, fileDef.fileName)
+             if (file.exists()) file.delete()
+        }
+    }
+}
