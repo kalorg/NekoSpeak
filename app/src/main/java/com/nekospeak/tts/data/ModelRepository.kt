@@ -263,14 +263,23 @@ object ModelRepository {
                             onError("Redirection sans en-tête Location pour: $currentUrl")
                             return false
                         }
-                        // Sécurité: n'accepter que les redirections http(s)
-                        if (!newUrl.startsWith("http")) {
+                        // Résout les redirections RELATIVES (RFC 7231) contre l'URL courante.
+                        // HuggingFace renvoie par ex. "/api/resolve-cache/..." pour les
+                        // petits fichiers (config.json, manifests) : c'est légitime.
+                        // Ex: "Download failed at 80%" sur omnivoice-config.json.
+                        val resolvedUrl = try {
+                            URL(URL(currentUrl), newUrl).toString()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        // Sécurité: n'accepter que les redirections http(s) (absolues après résolution)
+                        if (resolvedUrl == null || !(resolvedUrl.startsWith("http://") || resolvedUrl.startsWith("https://"))) {
                             Log.e(TAG, "Refusing redirect with non-http scheme: $newUrl")
                             onError("Redirection refusée (schéma non http): $newUrl")
                             return false
                         }
-                        Log.d(TAG, "Redirecting to: $newUrl")
-                        currentUrl = newUrl
+                        Log.d(TAG, "Redirecting to: $resolvedUrl")
+                        currentUrl = resolvedUrl
                         connection.disconnect()
                         redirectCount++
                     }
