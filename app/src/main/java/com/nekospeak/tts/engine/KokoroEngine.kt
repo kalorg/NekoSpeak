@@ -41,7 +41,7 @@ class KokoroEngine(private val context: Context) : TtsEngine {
     private var ortSession: OrtSession? = null
     private var voiceCache = mutableMapOf<String, FloatArray>()
     private var initialized = false
-    private var currentVoice = "af_heart"
+    private var currentVoice = "ff_siwis"
     private var currentModelInfo = Triple(MODEL_KOKORO_ASSET, MODEL_KOKORO_FILE, VOICES_KOKORO_ASSET)
     
     private var inputIdsName = "input_ids"
@@ -277,9 +277,10 @@ class KokoroEngine(private val context: Context) : TtsEngine {
             for (sentence in sentences) {
                 if (sentence.isBlank()) continue
                 
-                // G2P + Tokenization
+                // G2P + Tokenization — langue déduite de la voix (ff_* = français)
                 val startG2p = System.currentTimeMillis()
-                val phonemes = phonemizer.phonemize(sentence, "en-us")
+                val phonemeLang = if (currentVoice.startsWith("ff_")) "fr" else "en-us"
+                val phonemes = phonemizer.phonemize(sentence, phonemeLang)
                 val tokens = phonemizer.tokenize(phonemes)
                 Log.d(TAG, "G2P time: ${System.currentTimeMillis() - startG2p}ms for ${tokens.size} tokens")
                 
