@@ -119,12 +119,25 @@ object ModelRepository {
         return _downloadStates[modelId]?.asStateFlow()
     }
 
+    /**
+     * Taille minimale pour considérer un fichier local comme valide.
+     * Les gros fichiers (onnx, wav, npy, tokenizer...) doivent dépasser 1 Ko,
+     * mais les fichiers de configuration font souvent moins d'1 Ko
+     * (ex: omnivoice-config.json = 218 octets, manifest = 155 octets).
+     * Le seuil unique de 1024 o faisait donc échouer isInstalled() sans
+     * aucune erreur visible après un téléchargement complet.
+     */
+    private fun isValidLocalFile(file: File): Boolean {
+        val minBytes = if (file.extension.equals("json", ignoreCase = true)) 50L else 1024L
+        return file.exists() && file.length() > minBytes
+    }
+
     fun isInstalled(context: Context, modelId: String): Boolean {
         val model = models.find { it.id == modelId } ?: return false
         return model.files.all { fileDef ->
             if (modelId == "omnivoice" && fileDef.fileName.contains("encoder")) return@all true
             val file = File(context.filesDir, fileDef.fileName)
-            file.exists() && file.length() > 1024
+            isValidLocalFile(file)
         }
     }
 
@@ -160,7 +173,7 @@ object ModelRepository {
                 val stat = StatFs(context.filesDir.absolutePath)
                 val alreadyOnDisk = model.files
                     .map { File(context.filesDir, it.fileName) }
-                    .filter { it.exists() && it.length() > 1024 }
+                    .filter { isValidLocalFile(it) }
                     .sumOf { it.length() }
                 val remainingBytes = (model.requiredBytes - alreadyOnDisk).coerceAtLeast(0L)
                 if (stat.availableBytes < remainingBytes) {
@@ -184,7 +197,7 @@ object ModelRepository {
                 val targetFile = File(context.filesDir, fileDef.fileName)
 
                 // Skip if already downloaded and valid
-                if (targetFile.exists() && targetFile.length() > 1024) {
+                if (isValidLocalFile(targetFile)) {
                     Log.d(TAG, "File already exists: ${fileDef.fileName}")
                     filesDownloaded++
                     progressFlow.value = filesDownloaded.toFloat() / totalFiles
