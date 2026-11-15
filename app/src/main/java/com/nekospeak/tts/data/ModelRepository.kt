@@ -49,14 +49,20 @@ object ModelRepository {
                 ModelFile("pocket/models/mimi_decoder_int8.onnx", "$HF_BASE/$BUNDLE/mimi_decoder_int8.onnx", "Mimi Decoder INT8 (23MB)"),
                 ModelFile("pocket/tokenizer.model", "$HF_BASE/$BUNDLE/tokenizer.model", "Tokenizer (59KB)"),
                 ModelFile("pocket/bos_before_voice.npy", "$HF_BASE/$BUNDLE/bos_before_voice.npy", "Voice BOS embedding"),
-                ModelFile("pocket/voices/alba.wav", "$VOICES_BASE/alba-mackenna/casual.wav", "Alba Voice"),
-                ModelFile("pocket/voices/marius.wav", "$VOICES_BASE/voice-donations/Selfie.wav", "Marius Voice"),
-                ModelFile("pocket/voices/javert.wav", "$VOICES_BASE/voice-donations/Butter.wav", "Javert Voice"),
-                ModelFile("pocket/voices/jean.wav", "$VOICES_BASE/ears/p010/freeform_speech_01.wav", "Jean Voice"),
-                ModelFile("pocket/voices/fantine.wav", "$VOICES_BASE/vctk/p244_023.wav", "Fantine Voice"),
-                ModelFile("pocket/voices/cosette.wav", "$VOICES_BASE/expresso/ex04-ex02_confused_001_channel1_499s.wav", "Cosette Voice"),
-                ModelFile("pocket/voices/eponine.wav", "$VOICES_BASE/vctk/p262_023.wav", "Eponine Voice"),
-                ModelFile("pocket/voices/azelma.wav", "$VOICES_BASE/vctk/p303_023.wav", "Azelma Voice")
+                // Voix françaises (corpus Expresso, locuteurs natifs FR, licence CC BY-NC)
+                ModelFile("pocket/voices/narrateur.wav", "$VOICES_BASE/expresso/ex03-ex02_narration_001_channel1_674s.wav", "Le Narrateur (narration grave)"),
+                ModelFile("pocket/voices/conteuse.wav", "$VOICES_BASE/expresso/ex04-ex01_narration_001_channel1_605s.wav", "La Conteuse (narration féminine)"),
+                ModelFile("pocket/voices/murmure.wav", "$VOICES_BASE/expresso/ex01-ex02_whisper_001_channel1_579s.wav", "Le Murmure (chuchotement grave)"),
+                ModelFile("pocket/voices/chuchoteuse.wav", "$VOICES_BASE/expresso/ex04-ex03_whisper_001_channel1_198s.wav", "La Chuchoteuse (chuchotement)"),
+                ModelFile("pocket/voices/effroi.wav", "$VOICES_BASE/expresso/ex03-ex01_awe_001_channel1_1323s.wav", "L'Effroi (voix grave, crainte)"),
+                ModelFile("pocket/voices/frayeur.wav", "$VOICES_BASE/expresso/ex04-ex02_fearful_001_channel1_316s.wav", "La Frayeur (peur, tension)"),
+                ModelFile("pocket/voices/douleur.wav", "$VOICES_BASE/expresso/ex03-ex02_sad-sympathetic_001_channel1_454s.wav", "La Douleur (mélancolie)"),
+                ModelFile("pocket/voices/sangfroid.wav", "$VOICES_BASE/expresso/ex03-ex01_calm_001_channel1_1143s.wav", "Le Sang-froid (calme)"),
+                ModelFile("pocket/voices/apaisee.wav", "$VOICES_BASE/expresso/ex04-ex02_calm_002_channel1_480s.wav", "L'Apaisée (calme)"),
+                ModelFile("pocket/voices/colere.wav", "$VOICES_BASE/expresso/ex03-ex01_angry_001_channel1_201s.wav", "La Colère (rage contenue)"),
+                ModelFile("pocket/voices/defi.wav", "$VOICES_BASE/expresso/ex04-ex02_angry_001_channel1_119s.wav", "Le Défi (colère féminine)"),
+                ModelFile("pocket/voices/naturel_m.wav", "$VOICES_BASE/expresso/ex01-ex02_default_001_channel1_168s.wav", "Dialogues naturels (homme)"),
+                ModelFile("pocket/voices/naturel_f.wav", "$VOICES_BASE/expresso/ex04-ex03_default_002_channel2_239s.wav", "Dialogues naturels (femme)")
             )
         ),
         ModelInfo(
