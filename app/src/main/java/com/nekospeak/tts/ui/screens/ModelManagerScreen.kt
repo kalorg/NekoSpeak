@@ -171,7 +171,10 @@ fun ModelCardWithState(
                     if (success) {
                         onRefresh() // Trigger UI update
                     } else {
-                        downloadError = "Download failed. Check connection."
+                        // Affiche la cause exacte (fichier en échec, URL, exception)
+                        // enregistrée par ModelRepository, au lieu d'un message générique.
+                        downloadError = ModelRepository.lastError.value
+                            ?: "Download failed. Check connection."
                     }
                 }
             }
