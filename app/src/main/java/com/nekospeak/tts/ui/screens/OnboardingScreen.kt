@@ -38,8 +38,8 @@ fun OnboardingScreen(navController: NavController) {
     val context = LocalContext.current
     val prefs = remember { PrefsManager(context) }
     
-    var selectedModel by remember { mutableStateOf("kokoro_v1.0") }
-    var selectedVoice by remember { mutableStateOf("af_heart") }
+    var selectedModel by remember { mutableStateOf("pocket_v1") }
+    var selectedVoice by remember { mutableStateOf("narrateur") }
     
     // Model Installation State
     var isModelInstalled by remember { mutableStateOf(false) }
