@@ -69,7 +69,7 @@ class PocketTtsEngine(
     private var gtcrnDenoiser: GtcrnDenoiser? = null
     
     private val voiceStates = mutableMapOf<String, PocketVoiceState>()
-    private var currentVoice: String = "alba"
+    private var currentVoice: String = "narrateur"
     private var initialized = false
     @Volatile private var isReleased = false
     @Volatile private var stopRequested = false
@@ -959,7 +959,7 @@ class PocketTtsEngine(
         // Final fallback to alba if still not found
         if (voiceState == null) {
             Log.w(TAG, "Voice not found after on-demand check: $voiceName, falling back to alba")
-            voiceState = voiceStates["alba"] ?: return@withContext
+            voiceState = voiceStates["narrateur"] ?: return@withContext
         }
         
         Log.d(TAG, "Generating speech for: '${text.take(50)}...' with voice: $voiceName")
