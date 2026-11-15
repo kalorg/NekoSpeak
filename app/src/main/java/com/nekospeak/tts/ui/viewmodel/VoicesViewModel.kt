@@ -47,7 +47,7 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
         val searchQuery: String = "",
         val showFilters: Boolean = false,
         val viewMode: ViewMode = ViewMode.LIST,
-        val selectedVoiceId: String? = "af_heart", // Default
+        val selectedVoiceId: String? = "narrateur", // Default
         
         // Filters
         val selectedLanguage: String? = null,
@@ -72,38 +72,9 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
     private val voiceRepo by lazy { com.nekospeak.tts.data.VoiceRepository(context) }
     private val voiceDownloader by lazy { com.nekospeak.tts.data.VoiceDownloader(context) }
     
+    // Kokoro : seule voix française disponible dans le pack ONNX
     private val kokoroVoices = listOf(
-        Voice("af_heart", "Heart", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_alloy", "Alloy", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_aoede", "Aoede", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_bella", "Bella", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_jessica", "Jessica", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_kore", "Kore", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_nicole", "Nicole", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_nova", "Nova", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_river", "River", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_sarah", "Sarah", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        Voice("af_sky", "Sky", "en-us", "Female", "US", modelType = "kokoro_v1.0"),
-        
-        Voice("am_adam", "Adam", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_echo", "Echo", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_eric", "Eric", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_fenrir", "Fenrir", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_liam", "Liam", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_michael", "Michael", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_onyx", "Onyx", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_puck", "Puck", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-        Voice("am_santa", "Santa", "en-us", "Male", "US", modelType = "kokoro_v1.0"),
-
-        Voice("bf_alice", "Alice", "en-gb", "Female", "UK", modelType = "kokoro_v1.0"),
-        Voice("bf_emma", "Emma", "en-gb", "Female", "UK", modelType = "kokoro_v1.0"),
-        Voice("bf_isabella", "Isabella", "en-gb", "Female", "UK", modelType = "kokoro_v1.0"),
-        Voice("bf_lily", "Lily", "en-gb", "Female", "UK", modelType = "kokoro_v1.0"),
-
-        Voice("bm_daniel", "Daniel", "en-gb", "Male", "UK", modelType = "kokoro_v1.0"),
-        Voice("bm_fable", "Fable", "en-gb", "Male", "UK", modelType = "kokoro_v1.0"),
-        Voice("bm_george", "George", "en-gb", "Male", "UK", modelType = "kokoro_v1.0"),
-        Voice("bm_lewis", "Lewis", "en-gb", "Male", "UK", modelType = "kokoro_v1.0")
+        Voice("ff_siwis", "Siwis", "fr-fr", "Female", "France", modelType = "kokoro_v1.0")
     )
     
     private val kittenVoices = listOf(
@@ -251,7 +222,7 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                         Voice(
                             id = def.id,
                             name = def.name,
-                            language = if (def.region.contains("French")) "fr-fr" else "en-us",
+                            language = "fr-fr",
                             gender = def.gender,
                             region = def.region,
                             downloadState = com.nekospeak.tts.data.DownloadState.Downloaded,
@@ -286,8 +257,8 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                                 clonedVoices.add(
                                     Voice(
                                         id = state.id,
-                                        name = "${state.displayName} (Cloned)",
-                                        language = "en-us",
+                                        name = "${state.displayName} (Clonée)",
+                                        language = "fr-fr",
                                         gender = "Cloned",
                                         region = "Custom",
                                         downloadState = com.nekospeak.tts.data.DownloadState.Downloaded,
@@ -383,7 +354,8 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                          // Default to amy-low if available, else first bundled
                          "en_US-amy-low"
                     }
-                    else -> "af_heart"
+                    currentModel == "kokoro_v1.0" -> "ff_siwis"
+                    else -> "narrateur"
                 }
                 // Update persistent storage
                 prefs.currentVoice = defaultId
