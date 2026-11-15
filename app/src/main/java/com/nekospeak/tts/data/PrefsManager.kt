@@ -26,6 +26,7 @@ class PrefsManager(context: Context) {
         private const val KEY_OMNIVOICE_STEPS = "omnivoice_num_steps"
         private const val KEY_OMNIVOICE_CFG = "omnivoice_guidance_scale"
         private const val KEY_OMNIVOICE_TSHIFT = "omnivoice_t_shift"
+        private const val KEY_FR_MIGRATION = "fr_migration_done"
     }
 
     // Reactive counter for theme updates
@@ -40,14 +41,35 @@ class PrefsManager(context: Context) {
 
     init {
         prefs.registerOnSharedPreferenceChangeListener(listener)
+        migrateToFrenchVoices()
+    }
+
+    /**
+     * Migration ponctuelle : bascule les installations existantes vers les voix françaises.
+     * Les anciens défauts (af_heart / kokoro_v1.0) n'existent plus côté français.
+     */
+    private fun migrateToFrenchVoices() {
+        if (prefs.getBoolean(KEY_FR_MIGRATION, false)) return
+        val editor = prefs.edit()
+        if (currentVoice == "af_heart" || currentVoice in listOf(
+                "alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"
+            )
+        ) {
+            editor.putString(KEY_VOICE, "narrateur")
+        }
+        if (currentModel == "kokoro_v1.0") {
+            editor.putString(KEY_MODEL, "pocket_v1")
+        }
+        editor.putBoolean(KEY_FR_MIGRATION, true)
+        editor.apply()
     }
 
     var currentVoice: String
-        get() = prefs.getString(KEY_VOICE, "af_heart") ?: "af_heart"
+        get() = prefs.getString(KEY_VOICE, "narrateur") ?: "narrateur"
         set(value) = prefs.edit().putString(KEY_VOICE, value).apply()
 
     var currentModel: String
-        get() = prefs.getString(KEY_MODEL, "kokoro_v1.0") ?: "kokoro_v1.0"
+        get() = prefs.getString(KEY_MODEL, "pocket_v1") ?: "pocket_v1"
         set(value) = prefs.edit().putString(KEY_MODEL, value).apply()
 
     var cpuThreads: Int
