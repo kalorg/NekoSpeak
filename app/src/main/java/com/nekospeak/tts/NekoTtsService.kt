@@ -249,7 +249,7 @@ class NekoTtsService : TextToSpeechService() {
             val engine = currentEngine
             if (engine == null || !engine.isInitialized()) {
                 Log.w(TAG, "onGetDefaultVoiceNameFor: engine not initialized")
-                return "af_heart"
+                return "narrateur"
             }
 
             val prefs = com.nekospeak.tts.data.PrefsManager(this)
@@ -283,12 +283,12 @@ class NekoTtsService : TextToSpeechService() {
             // 4. First available
             val firstAvailable = availableVoices.firstOrNull()
 
-            val result = countryMatch ?: langMatch ?: prefMatch ?: firstAvailable ?: "af_heart"
+            val result = countryMatch ?: langMatch ?: prefMatch ?: firstAvailable ?: "narrateur"
             Log.d(TAG, "onGetDefaultVoiceNameFor: lang=$lang country=$country → $result")
             return result
         } catch (e: Exception) {
             Log.e(TAG, "Error getting default voice", e)
-            "af_heart"
+            "narrateur"
         }
     }
 
@@ -565,8 +565,11 @@ class NekoTtsService : TextToSpeechService() {
             voiceId.startsWith("ov_ru_") -> Locale("ru", "RU")
             voiceId.startsWith("ov_hi_") -> Locale("hi", "IN")
             voiceId.startsWith("ov_") -> Locale.US  // English OmniVoice presets
-            // Pocket voices
-            voiceId in listOf("alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma") -> Locale.US
+            // Pocket voices : voix françaises Expresso
+            voiceId in listOf(
+                "narrateur", "conteuse", "murmure", "chuchoteuse", "effroi", "frayeur",
+                "douleur", "sangfroid", "apaisee", "colere", "defi", "naturel_m", "naturel_f"
+            ) -> Locale("fr", "FR")
             voiceId.startsWith("celebrity_") -> Locale.US
             // Piper voices: parse language code from ID (e.g. "en_US-amy-low")
             else -> {
