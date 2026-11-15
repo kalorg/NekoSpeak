@@ -1,6 +1,7 @@
 package com.nekospeak.tts.data
 
 import android.content.Context
+import android.os.StatFs
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -26,7 +27,9 @@ data class ModelInfo(
     val name: String,
     val description: String,
     val files: List<ModelFile>,
-    val version: String = "1.0"
+    val version: String = "1.0",
+    /** Taille totale approximative du téléchargement, pour le contrôle d'espace disque. */
+    val requiredBytes: Long = 0L
 )
 
 object ModelRepository {
@@ -63,7 +66,8 @@ object ModelRepository {
                 ModelFile("pocket/voices/defi.wav", "$VOICES_BASE/expresso/ex04-ex02_angry_001_channel1_119s.wav", "Le Défi (colère féminine)"),
                 ModelFile("pocket/voices/naturel_m.wav", "$VOICES_BASE/expresso/ex01-ex02_default_001_channel1_168s.wav", "Dialogues naturels (homme)"),
                 ModelFile("pocket/voices/naturel_f.wav", "$VOICES_BASE/expresso/ex04-ex03_default_002_channel2_239s.wav", "Dialogues naturels (femme)")
-            )
+            ),
+            requiredBytes = 300_000_000L // ~300 Mo
         ),
         ModelInfo(
             id = "kokoro_v1.0",
@@ -72,7 +76,8 @@ object ModelRepository {
             files = listOf(
                 ModelFile("kokoro-v1.0.int8.onnx", "https://github.com/siva-sub/NekoSpeak/releases/download/v1.0.0/kokoro-v1.0.int8.onnx", "Model Weights"),
                 ModelFile("voices-v1.0.bin", "https://github.com/siva-sub/NekoSpeak/releases/download/v1.0.0/voices-v1.0.bin", "Voice Pack")
-            )
+            ),
+            requiredBytes = 200_000_000L // ~200 Mo
         ),
         ModelInfo(
             id = "kitten_nano",
@@ -81,7 +86,8 @@ object ModelRepository {
             files = listOf(
                 ModelFile("kitten_tts_nano_v0_1.onnx", "https://github.com/siva-sub/NekoSpeak/releases/download/v1.0.0/kitten_tts_nano_v0_1.onnx", "Model Weights"),
                 ModelFile("voices.npz", "https://github.com/siva-sub/NekoSpeak/releases/download/v1.0.0/voices.npz", "Voice Pack")
-            )
+            ),
+            requiredBytes = 150_000_000L // ~150 Mo
         ),
         ModelInfo(
             id = "omnivoice",
@@ -98,7 +104,8 @@ object ModelRepository {
                 ModelFile("omnivoice/omnivoice-encoder-fixed.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-encoder-fixed.onnx", "Audio Encoder - Voice Cloning (624MB)"),
                 ModelFile("omnivoice/omnivoice-config.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-config.json", "Model Config"),
                 ModelFile("omnivoice/omnivoice-main-manifest.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main-manifest.json", "Shard Manifest")
-            )
+            ),
+            requiredBytes = 3_300_000_000L // ~3,3 Go (shards + decoder + encoder 624 Mo)
         )
     )
 
@@ -146,6 +153,30 @@ object ModelRepository {
         _downloadStates[modelId] = progressFlow
 
         try {
+            // Contrôle préalable de l'espace disque interne.
+            // Cause fréquente d'échec "aléatoire" en cours de téléchargement (ENOSPC),
+            // en particulier pour OmniVoice (~3,3 Go).
+            if (model.requiredBytes > 0L) {
+                val stat = StatFs(context.filesDir.absolutePath)
+                val alreadyOnDisk = model.files
+                    .map { File(context.filesDir, it.fileName) }
+                    .filter { it.exists() && it.length() > 1024 }
+                    .sumOf { it.length() }
+                val remainingBytes = (model.requiredBytes - alreadyOnDisk).coerceAtLeast(0L)
+                if (stat.availableBytes < remainingBytes) {
+                    val requiredMb = remainingBytes / (1024L * 1024L)
+                    val freeMb = stat.availableBytes / (1024L * 1024L)
+                    val msg = "Espace insuffisant sur le stockage interne : " +
+                        "$requiredMb Mo nécessaires, seulement $freeMb Mo libres. " +
+                        "Libérez de l'espace (ou supprimez d'autres modèles dans le Gestionnaire de modèles) puis réessayez."
+                    Log.e(TAG, msg)
+                    _lastError.value = msg
+                    logErrorToFile(context, msg)
+                    withContext(Dispatchers.Main) { onComplete(false) }
+                    return@withContext
+                }
+            }
+
             val totalFiles = model.files.size
             var filesDownloaded = 0
 
