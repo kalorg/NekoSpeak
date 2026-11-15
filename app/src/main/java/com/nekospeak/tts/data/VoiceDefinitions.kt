@@ -12,87 +12,35 @@ data class VoiceDefinition(
 
 object VoiceDefinitions {
     
-    // Pocket-TTS Standard Voices (Kyutai) - All speak English only
+    // Voix françaises Pocket-TTS (corpus Expresso, Kyutai) — locuteurs natifs français
+    // Licence CC BY-NC : usage personnel OK
     val POCKET_VOICES = listOf(
-        VoiceDefinition("alba", "Alba", "Male", "English", "Casual speaking style", "https://huggingface.co/kyutai/tts-voices/blob/main/alba-mackenna/casual.wav", "pocket_v1"),
-        VoiceDefinition("marius", "Marius", "Male", "English", "Selfie (Voice Donation)", "https://huggingface.co/kyutai/tts-voices/blob/main/voice-donations/Selfie.wav", "pocket_v1"),
-        VoiceDefinition("javert", "Javert", "Male", "English", "Butter (Voice Donation)", "https://huggingface.co/kyutai/tts-voices/blob/main/voice-donations/Butter.wav", "pocket_v1"),
-        VoiceDefinition("jean", "Jean", "Male", "English", "EARS p010 speaker", "https://huggingface.co/kyutai/tts-voices/blob/main/ears/p010/freeform_speech_01.wav", "pocket_v1"),
-        VoiceDefinition("fantine", "Fantine", "Female", "English", "VCTK speaker p244", "https://huggingface.co/kyutai/tts-voices/blob/main/vctk/p244_023.wav", "pocket_v1"),
-        VoiceDefinition("cosette", "Cosette", "Female", "English", "Expresso - Confused", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex02_confused_001_channel1_499s.wav", "pocket_v1"),
-        VoiceDefinition("eponine", "Eponine", "Female", "English", "VCTK speaker p262", "https://huggingface.co/kyutai/tts-voices/blob/main/vctk/p262_023.wav", "pocket_v1"),
-        VoiceDefinition("azelma", "Azelma", "Female", "English", "VCTK speaker p303", "https://huggingface.co/kyutai/tts-voices/blob/main/vctk/p303_023.wav", "pocket_v1")
+        VoiceDefinition("narrateur", "Le Narrateur", "Male", "French", "Narration posée et grave, idéale pour les romans", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex03-ex02_narration_001_channel1_674s.wav", "pocket_v1"),
+        VoiceDefinition("conteuse", "La Conteuse", "Female", "French", "Narration féminine envoûtante pour les récits sombres", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex01_narration_001_channel1_605s.wav", "pocket_v1"),
+        VoiceDefinition("murmure", "Le Murmure", "Male", "French", "Chuchotement grave, atmosphère inquiétante", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex01-ex02_whisper_001_channel1_579s.wav", "pocket_v1"),
+        VoiceDefinition("chuchoteuse", "La Chuchoteuse", "Female", "French", "Chuchotement féminin, frissons garantis", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex03_whisper_001_channel1_198s.wav", "pocket_v1"),
+        VoiceDefinition("effroi", "L'Effroi", "Male", "French", "Voix grave marquée par la crainte et l'épouvante", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex03-ex01_awe_001_channel1_1323s.wav", "pocket_v1"),
+        VoiceDefinition("frayeur", "La Frayeur", "Female", "French", "Voix féminine tremblante, tension et peur", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex02_fearful_001_channel1_316s.wav", "pocket_v1"),
+        VoiceDefinition("douleur", "La Douleur", "Male", "French", "Mélancolie et compassion, passages tristes", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex03-ex02_sad-sympathetic_001_channel1_454s.wav", "pocket_v1"),
+        VoiceDefinition("sangfroid", "Le Sang-froid", "Male", "French", "Calme imperturbable, descriptions et pauses", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex03-ex01_calm_001_channel1_1143s.wav", "pocket_v1"),
+        VoiceDefinition("apaisee", "L'Apaisée", "Female", "French", "Douceur féminine, moments de répit", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex02_calm_002_channel1_480s.wav", "pocket_v1"),
+        VoiceDefinition("colere", "La Colère", "Male", "French", "Rage contenue, confrontations et antagonistes", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex03-ex01_angry_001_channel1_201s.wav", "pocket_v1"),
+        VoiceDefinition("defi", "Le Défi", "Female", "French", "Colère féminine, répliques cinglantes", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex02_angry_001_channel1_119s.wav", "pocket_v1"),
+        VoiceDefinition("naturel_m", "Compagnon", "Male", "French", "Dialogue naturel masculin", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex01-ex02_default_001_channel1_168s.wav", "pocket_v1"),
+        VoiceDefinition("naturel_f", "Compagne", "Female", "French", "Dialogue naturel féminin", "https://huggingface.co/kyutai/tts-voices/blob/main/expresso/ex04-ex03_default_002_channel2_239s.wav", "pocket_v1")
     )
 
-    // Kokoro Standard Voices — expanded to include all voices from the ONNX model
-    // The onnx-community/Kokoro-82M-ONNX voice pack includes these voice embeddings.
+    // Kokoro Standard Voices — seule voix française disponible dans le pack ONNX Kokoro-82M
     // Fixes: https://github.com/siva-sub/NekoSpeak/issues/5
     val KOKORO_VOICES = listOf(
-        // American Female voices
-        VoiceDefinition("af_heart", "Heart ♡", "Female", "US", "Warm American female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("af_bella", "Bella", "Female", "US", "Clear American female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("af_nicole", "Nicole", "Female", "US", "Professional American female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("af_sarah", "Sarah", "Female", "US", "Soft American female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("af_sky", "Sky", "Female", "US", "Bright American female voice", null, "kokoro_v1.0"),
-        
-        // American Male voices
-        VoiceDefinition("am_adam", "Adam", "Male", "US", "Deep American male voice", null, "kokoro_v1.0"),
-        VoiceDefinition("am_michael", "Michael", "Male", "US", "Natural American male voice", null, "kokoro_v1.0"),
-        
-        // British Female voices
-        VoiceDefinition("bf_emma", "Emma", "Female", "UK", "Elegant British female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("bf_isabella", "Isabella", "Female", "UK", "Refined British female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("bf_alice", "Alice", "Female", "UK", "Warm British female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("bf_lily", "Lily", "Female", "UK", "Young British female voice", null, "kokoro_v1.0"),
-        
-        // British Male voices
-        VoiceDefinition("bm_george", "George", "Male", "UK", "Authoritative British male voice", null, "kokoro_v1.0"),
-        VoiceDefinition("bm_lewis", "Lewis", "Male", "UK", "Friendly British male voice", null, "kokoro_v1.0"),
-        
-        // Additional voices from Kokoro v1.0 model
-        VoiceDefinition("bf_dora", "Dora", "Female", "UK", "Expressive British female voice", null, "kokoro_v1.0"),
-        VoiceDefinition("am_santa", "Santa", "Male", "US", "Deep festive American male voice", null, "kokoro_v1.0"),
-        
-        // French voices (Kokoro v1.0 multilingual)
-        VoiceDefinition("ff_siwis", "Siwis", "Female", "FR", "French female voice (multilingual)", null, "kokoro_v1.0"),
-        
-        // Hindi voice (Kokoro v1.0 multilingual)
-        VoiceDefinition("hf_alpha", "Alpha ♀", "Female", "IN", "Hindi female voice (multilingual)", null, "kokoro_v1.0"),
-        VoiceDefinition("hm_beta", "Beta ♂", "Male", "IN", "Hindi male voice (multilingual)", null, "kokoro_v1.0"),
-        
-        // Japanese voices (Kokoro v1.0 multilingual)
-        VoiceDefinition("jf_gongitsune", "Gongitsune", "Female", "JP", "Japanese female voice (multilingual)", null, "kokoro_v1.0"),
-        VoiceDefinition("jf_nezumi", "Nezumi", "Female", "JP", "Japanese female voice (multilingual)", null, "kokoro_v1.0"),
-        VoiceDefinition("jm_kumo", "Kumo", "Male", "JP", "Japanese male voice (multilingual)", null, "kokoro_v1.0"),
-        
-        // Mandarin Chinese voice (Kokoro v1.0 multilingual)
-        VoiceDefinition("zf_xiaobei", "Xiaobei", "Female", "CN", "Mandarin Chinese female voice (multilingual)", null, "kokoro_v1.0"),
-        
-        // Korean voice (Kokoro v1.0 multilingual)
-        VoiceDefinition("kf_xiaoyi", "Xiaoyi", "Female", "KR", "Korean female voice (multilingual)", null, "kokoro_v1.0"),
+        // Voix française (Kokoro v1.0 multilingual)
+        VoiceDefinition("ff_siwis", "Siwis", "Female", "FR", "Voix féminine française (multilingue)", null, "kokoro_v1.0")
     )
     
     // Celebrity Voices (Downloaded on-demand from HuggingFace)
     // WARNING: Celebrity voice cloning raises ethical/legal concerns. Use responsibly.
-    val CELEBRITY_VOICES = listOf(
-        // Politicians
-        VoiceDefinition("celebrity_trump", "Donald Trump", "Male", "US", "⭐ Former US President", null, "pocket_v1"),
-        VoiceDefinition("celebrity_biden", "Joe Biden", "Male", "US", "⭐ US President", null, "pocket_v1"),
-        VoiceDefinition("celebrity_obama", "Barack Obama", "Male", "US", "⭐ Former US President", null, "pocket_v1"),
-        VoiceDefinition("celebrity_hillary", "Hillary Clinton", "Female", "US", "⭐ Former Secretary of State", null, "pocket_v1"),
-        VoiceDefinition("celebrity_kamala", "Kamala Harris", "Female", "US", "⭐ US Vice President", null, "pocket_v1"),
-        // Tech Leaders
-        VoiceDefinition("celebrity_musk", "Elon Musk", "Male", "US", "⭐ Tech Entrepreneur", null, "pocket_v1"),
-        VoiceDefinition("celebrity_bill_gates", "Bill Gates", "Male", "US", "⭐ Microsoft co-founder", null, "pocket_v1"),
-        VoiceDefinition("celebrity_zuckerberg", "Mark Zuckerberg", "Male", "US", "⭐ Meta CEO", null, "pocket_v1"),
-        VoiceDefinition("celebrity_jensen", "Jensen Huang", "Male", "US", "⭐ NVIDIA CEO", null, "pocket_v1"),
-        // Media & Authors
-        VoiceDefinition("celebrity_oprah", "Oprah Winfrey", "Female", "US", "⭐ Media Personality", null, "pocket_v1"),
-        VoiceDefinition("celebrity_jk_rowling", "J.K. Rowling", "Female", "UK", "⭐ Harry Potter Author", null, "pocket_v1"),
-        // Activists & Others
-        VoiceDefinition("celebrity_greta", "Greta Thunberg", "Female", "Swedish", "⭐ Climate Activist", null, "pocket_v1"),
-        VoiceDefinition("celebrity_tate", "Andrew Tate", "Male", "UK", "⭐ Internet Personality", null, "pocket_v1")
-    )
+    // Liste vidée : application orientée lecture en français, clonage de personnalités désactivé.
+    val CELEBRITY_VOICES = listOf<VoiceDefinition>()
     
     // OmniVoice preset voices — voice design system
     // These use instruct-based voice control (gender + pitch → text description)
