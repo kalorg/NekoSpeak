@@ -39,15 +39,17 @@ fun VoiceCard(
 
     // Visual badge for voice source
     val sourceBadge = when {
+        voice.isHfVoice -> "🎙️"  // Voix fine-tunée HuggingFace
         isCloned -> "🧬"
         voice.modelType == "omnivoice" -> "✨"  // Voice design
         voice.modelType.startsWith("piper") -> "🔊"
         voice.modelType == "pocket_v1" -> "🎤"
         else -> ""
     }
-    
+
     // Engine label
     val engineLabel = when {
+        voice.isHfVoice -> "Fine-tunée"
         isCloned -> "Cloned"
         voice.modelType == "omnivoice" -> "Voice Design"
         voice.modelType == "pocket_v1" -> "Pocket"

@@ -74,27 +74,27 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
         // Model files
         private val MODEL_FILES = listOf(
-            "omnivoice-main-split.onnx",
             "omnivoice-decoder.onnx",
             "omnivoice-encoder-fixed.onnx"  // Optional — for voice cloning
         )
 
-        // Backbone narrateur : données externes en un seul fichier (~2,4 Go),
-        // exporté par le notebook « export vocoloco » (remplace les 5 shards Gigsu)
-        private const val MAIN_DATA_FILE = "omnivoice-main.onnx_data"
-        private const val MAIN_DATA_MIN_BYTES = 1_000_000_000L
-
-        // Voix « narrateur » (LoRA fine-tuné, voix masculine FR dark fantasy) :
-        // clonée automatiquement au premier démarrage depuis la référence embarquée
+        // Voix « narrateur » (LoRA fine-tuné, voix masculine FR dark fantasy).
+        // Le backbone et la référence vivent désormais dans filesDir/hf_voices/
+        // <id>/ (voir HfVoiceCatalog) ; cette constante sert à la migration de
+        // l'ancien layout et à la persistance de la voix clonée onboardée.
         const val NARRATEUR_VOICE_ID = "narrateur"
-        private const val NARRATEUR_REF_TEXT = "Il déambula dans les rues désertes et les jardins publics d'Agrillon, réfléchissant avec gravité aux propos de l'estropier et le maudissant, sans pouvoir néanmoins mettre cette conversation de côté."
+        const val NARRATEUR_REF_TEXT = "Il déambula dans les rues désertes et les jardins publics d'Agrillon, réfléchissant avec gravité aux propos de l'estropier et le maudissant, sans pouvoir néanmoins mettre cette conversation de côté."
     }
 
     // ONNX sessions
     private var ortEnv: OrtEnvironment? = null
-    private var mainSession: OrtSession? = null
     private var decoderSession: OrtSession? = null
     private var encoderSession: OrtSession? = null  // Optional — voice cloning
+    // Sessions backbone, une par voix HF fine-tunée (chargées à la demande,
+    // poids externes en mmap : ~0 RAM résidente par session inactive)
+    private val mainSessions = HashMap<String, OrtSession>()
+    // Voix HF installées (manifests locaux complets de filesDir/hf_voices/)
+    private var hfVoices: List<com.nekospeak.tts.data.HfVoice> = emptyList()
 
     // Tokenizer
     private var tokenizer: Qwen2Tokenizer? = null
@@ -129,8 +129,15 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         try {
             ortEnv = OrtEnvironment.getEnvironment()
 
-            // Check if model files exist
             val modelDir = File(context.filesDir, "omnivoice")
+
+            // Migration de l'ancien layout (backbone narrateur en racine de
+            // omnivoice/) vers filesDir/hf_voices/narrateur/, puis liste des
+            // voix HF installées. Au moins une voix doit être présente : le
+            // backbone appartient désormais aux voix (HfVoiceCatalog).
+            com.nekospeak.tts.data.HfVoiceCatalog.migrateLegacyNarrateur(context)
+            hfVoices = com.nekospeak.tts.data.HfVoiceCatalog.installedVoices(context)
+
             if (!areModelsDownloaded(modelDir)) {
                 Log.e(TAG, "OmniVoice models not downloaded. Need download step first.")
                 return@withContext false
@@ -151,11 +158,8 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             // Create session options with SIGBUS prevention
             val opts = OrtModelLoader.createSessionOptions(threadCount = 4)
 
-            // Load main model (sharded)
-            val mainFile = File(modelDir, "omnivoice-main-split.onnx")
-            Log.i(TAG, "Loading main model...")
-            mainSession = OrtModelLoader.loadModel(ortEnv!!, mainFile, opts)
-            Log.i(TAG, "Main model loaded")
+            // Load main models? NO — les backbones sont chargés à la demande
+            // par voix dans resolveMainSession() (chaque voix = son backbone).
 
             // Load decoder
             val decoderFile = File(modelDir, "omnivoice-decoder.onnx")
@@ -181,11 +185,11 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             // Load persisted cloned voices from disk
             loadClonedVoices()
 
-            // Onboard la voix « narrateur » (référence embarquée clip_0733) si absente
-            ensureNarrateurVoice()
+            // Onboard les voix HF installées (référence + refText du manifest)
+            ensureHfVoices()
 
             initialized = true
-            Log.i(TAG, "OmniVoice engine initialized successfully")
+            Log.i(TAG, "OmniVoice engine initialized successfully (${hfVoices.size} HF voice(s))")
             return@withContext true
 
         } catch (e: Exception) {
@@ -205,7 +209,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             if (!initialized) throw IllegalStateException("OmniVoice not initialized")
             stopRequested = false
 
-            val mainSess = mainSession ?: throw IllegalStateException("Main session null")
+            val mainSess = resolveMainSession(voice)
             val decoderSess = decoderSession ?: throw IllegalStateException("Decoder session null")
             val env = ortEnv ?: throw IllegalStateException("ORT env null")
             val tok = tokenizer ?: throw IllegalStateException("Tokenizer not loaded")
@@ -284,12 +288,15 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     }
 
     override fun release() {
-        try { mainSession?.close() } catch (_: Exception) {}
+        for ((id, sess) in mainSessions) {
+            try { sess.close() } catch (_: Exception) {}
+        }
+        mainSessions.clear()
         try { decoderSession?.close() } catch (_: Exception) {}
         try { encoderSession?.close() } catch (_: Exception) {}
-        mainSession = null
         decoderSession = null
         encoderSession = null
+        hfVoices = emptyList()
         initialized = false
         Log.i(TAG, "OmniVoice engine released")
     }
@@ -443,14 +450,93 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     // Internal: model loading
     // ========================================================================
 
+    /**
+     * Résout la session backbone pour une voix donnée. Chaque voix fine-tunée
+     * possède son propre backbone (~2,4 Go) dans filesDir/hf_voices/<id>/ :
+     * les sessions sont chargées à la demande (poids externes en mmap) et
+     * conservées pour la durée de vie de l'engine.
+     * - voix HF installée → son propre backbone
+     * - preset de voice design ou clone micro → backbone de la première voix
+     *   HF installée (ordre alphabétique), sinon erreur explicite.
+     */
+    private fun resolveMainSession(voiceId: String?): OrtSession {
+        val voice = hfVoices.firstOrNull { it.id == voiceId }
+            ?: hfVoices.firstOrNull()
+            ?: throw IllegalStateException(
+                "Aucune voix fine-tunée installée — téléchargez une voix depuis l'écran Voix"
+            )
+        mainSessions[voice.id]?.let { return it }
+        val env = ortEnv ?: throw IllegalStateException("ORT env null")
+        val dir = com.nekospeak.tts.data.HfVoiceCatalog.voiceDir(context, voice.id)
+        val graphFile = File(dir, voice.graphFile)
+        if (!graphFile.exists() || graphFile.length() < 1024) {
+            throw IllegalStateException("Backbone introuvable pour la voix '${voice.id}'")
+        }
+        Log.i(TAG, "Loading backbone for voice '${voice.id}'...")
+        val opts = OrtModelLoader.createSessionOptions(threadCount = 4)
+        val session = OrtModelLoader.loadModel(env, graphFile, opts)
+        mainSessions[voice.id] = session
+        Log.i(TAG, "Backbone '${voice.id}' loaded (${hfVoices.size} voice(s) installée(s))")
+        return session
+    }
+
+    /**
+     * Onboard chaque voix HF installée : encode sa référence (ref.wav du
+     * dossier local) avec l'encodeur Higgs et la persiste comme voix clonée,
+     * avec le refText exact du voice.json (essentiel au clonage qualité).
+     * Idempotent : les voix déjà présentes (déjà onboardées ou clonées) sont
+     * ignorées. La persistance .bin existante garde la priorité.
+     */
+    private fun ensureHfVoices() {
+        val enc = encoderSession ?: run {
+            Log.w(TAG, "Encoder absent — voix HF non onboardées (clonage micro indisponible)")
+            return
+        }
+        val env = ortEnv ?: return
+        for (voice in hfVoices) {
+            if (clonedVoices.containsKey(voice.id)) continue
+            try {
+                val dir = com.nekospeak.tts.data.HfVoiceCatalog.voiceDir(context, voice.id)
+                val refFile = File(dir, voice.refAudioFile)
+                if (!refFile.exists() || refFile.length() < 1024) {
+                    Log.w(TAG, "Référence absente pour la voix '${voice.id}' — pas d'onboarding")
+                    continue
+                }
+                val pcm = readWavAsFloat32(refFile.absolutePath)
+                if (pcm.isEmpty()) {
+                    Log.e(TAG, "Référence illisible pour '${voice.id}' — onboarding abandonné")
+                    continue
+                }
+                val hopLength = 960
+                val clipLen = pcm.size - (pcm.size % hopLength)
+                val aligned = pcm.copyOf(clipLen)
+
+                val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
+                val result = enc.run(mapOf("input_values" to inputTensor))
+                val codesTensor = result["audio_codes"] as? OnnxTensor ?: continue
+                @Suppress("UNCHECKED_CAST")
+                val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
+                val Cb = codesData[0].size
+                val T = codesData[0][0].size
+                val tokens = Array(Cb) { c -> LongArray(T) { t -> codesData[0][c][t] } }
+
+                val durationSec = clipLen.toFloat() / SAMPLE_RATE
+                val cloned = ClonedVoice(voice.id, tokens, refText = voice.refText, durationSec)
+                clonedVoices[voice.id] = cloned
+                saveClonedVoice(cloned)
+                Log.i(TAG, "Voix HF '${voice.id}' onboardée ($Cb codebooks, $T tokens, " +
+                    "%.1fs)".format(durationSec))
+            } catch (e: Exception) {
+                Log.e(TAG, "Échec de l'onboarding de la voix HF '${voice.id}'", e)
+            }
+        }
+    }
+
     private fun areModelsDownloaded(modelDir: File): Boolean {
-        val mainFile = File(modelDir, "omnivoice-main-split.onnx")
         val decoderFile = File(modelDir, "omnivoice-decoder.onnx")
-        if (!mainFile.exists() || mainFile.length() < 1024) return false
         if (!decoderFile.exists() || decoderFile.length() < 1024) return false
-        // Backbone narrateur : les poids externes en un seul fichier (~2,4 Go)
-        val dataFile = File(modelDir, MAIN_DATA_FILE)
-        return dataFile.exists() && dataFile.length() > MAIN_DATA_MIN_BYTES
+        // Le backbone appartient aux voix HF : au moins une doit être installée
+        return hfVoices.isNotEmpty()
     }
 
     private fun loadConfig(modelDir: File) {
@@ -888,53 +974,6 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         return nested
     }
 
-    /**
-     * Onboard la voix « narrateur » : encode la référence embarquée (clip_0733,
-     * 10,3 s, la même que pendant l'entraînement LoRA) avec l'encodeur Higgs,
-     * puis la persiste comme voix clonée — elle apparaît alors dans la liste
-     * des voix aux côtés des clones utilisateur, avec son texte de référence.
-     */
-    private fun ensureNarrateurVoice() {
-        if (clonedVoices.containsKey(NARRATEUR_VOICE_ID)) return
-        val enc = encoderSession ?: run {
-            Log.w(TAG, "Encoder absent — voix narrateur non onboardée")
-            return
-        }
-        val env = ortEnv ?: return
-        try {
-            val tmp = File(context.cacheDir, "narrateur_ref.wav")
-            if (!tmp.exists() || tmp.length() == 0L) {
-                context.assets.open("narrateur_ref.wav").use { input ->
-                    tmp.writeBytes(input.readBytes())
-                }
-            }
-            val pcm = readWavAsFloat32(tmp.absolutePath)
-            if (pcm.isEmpty()) {
-                Log.e(TAG, "narrateur_ref.wav illisible — onboarding abandonné")
-                return
-            }
-            val hopLength = 960
-            val clipLen = pcm.size - (pcm.size % hopLength)
-            val aligned = pcm.copyOf(clipLen)
-
-            val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
-            val result = enc.run(mapOf("input_values" to inputTensor))
-            val codesTensor = result["audio_codes"] as? OnnxTensor ?: return
-            @Suppress("UNCHECKED_CAST")
-            val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
-            val Cb = codesData[0].size
-            val T = codesData[0][0].size
-            val tokens = Array(Cb) { c -> LongArray(T) { t -> codesData[0][c][t] } }
-
-            val durationSec = clipLen.toFloat() / SAMPLE_RATE
-            val voice = ClonedVoice(NARRATEUR_VOICE_ID, tokens, refText = NARRATEUR_REF_TEXT, durationSec)
-            clonedVoices[NARRATEUR_VOICE_ID] = voice
-            saveClonedVoice(voice)
-            Log.i(TAG, "Voix narrateur onboardée ($Cb codebooks, $T tokens, %.1fs)".format(durationSec))
-        } catch (e: Exception) {
-            Log.e(TAG, "Échec de l'onboarding narrateur", e)
-        }
-    }
 
     /** Seeded PRNG (mulberry32) for deterministic generation. */
     private fun mulberry32(seed: Int): () -> Float {

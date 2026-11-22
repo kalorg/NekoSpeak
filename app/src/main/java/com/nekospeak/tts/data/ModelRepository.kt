@@ -36,14 +36,12 @@ object ModelRepository {
     private const val TAG = "ModelRepository"
 
     private const val HF_BASE = "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/main"
+    private const val HF_BASE_ONNX = "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main"
 
-    // Backbone narrateur (LoRA fine-tuné « voix narrateur FR ») : repo HF privé.
-    // Décodeur Higgs, encodeur de clonage, config et manifest restent sur Gigsu.
-    private const val NARRATEUR_HF_BASE = "https://huggingface.co/michaelpruvost/narrateur-vocoloco/resolve/main"
-
-    // Token HF (périmètre « read ») pour télécharger le repo privé ci-dessus.
-    // À coller sous la forme hf_xxx... — NE PAS publier ce token dans un dépôt public.
-    private const val NARRATEUR_HF_TOKEN = ""
+    // Les backbones fine-tunés (« voix ») ne sont plus listés ici : ils sont
+    // fournis par HfVoiceCatalog (repo HF privé michaelpruvost/narrateur-vocoloco,
+    // un dossier par voix + voice.json) et téléchargés depuis l'écran Voix.
+    // Le token d'accès au repo privé est saisi dans Réglages (PrefsManager.hfToken).
     private const val BUNDLE = "onnx/french_24l"
     private const val VOICES_BASE = "https://huggingface.co/kyutai/tts-voices/resolve/main"
 
@@ -99,16 +97,14 @@ object ModelRepository {
         ),
         ModelInfo(
             id = "omnivoice",
-            name = "OmniVoice Narrateur (LoRA FR)",
-            description = "TTS diffusion multilingue, backbone fine-tuné « voix narrateur » (LoRA, français). 2,4GB backbone + 83MB decoder. Optional 624MB encoder for voice cloning. ~3,2GB total download.",
+            name = "OmniVoice (moteur)",
+            description = "Moteur TTS diffusion : décodeur Higgs (83MB) + encodeur de clonage (624MB) + config. Les voix fine-tunées (~2,4GB chacune) se téléchargent séparément depuis l'écran Voix (repo HuggingFace privé).",
             files = listOf(
-                ModelFile("omnivoice/omnivoice-main-split.onnx", "$NARRATEUR_HF_BASE/omnivoice-main-split.onnx", "Backbone narrateur — graphe (1MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data", "$NARRATEUR_HF_BASE/omnivoice-main.onnx_data", "Backbone narrateur — poids fp32 (2,4GB)"),
-                ModelFile("omnivoice/omnivoice-decoder.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-decoder.onnx", "Audio Decoder (83MB)"),
-                ModelFile("omnivoice/omnivoice-encoder-fixed.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-encoder-fixed.onnx", "Audio Encoder - Voice Cloning (624MB)"),
-                ModelFile("omnivoice/omnivoice-config.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-config.json", "Model Config")
+                ModelFile("omnivoice/omnivoice-decoder.onnx", "$HF_BASE_ONNX/omnivoice-decoder.onnx", "Audio Decoder (83MB)"),
+                ModelFile("omnivoice/omnivoice-encoder-fixed.onnx", "$HF_BASE_ONNX/omnivoice-encoder-fixed.onnx", "Audio Encoder - Voice Cloning (624MB)"),
+                ModelFile("omnivoice/omnivoice-config.json", "$HF_BASE_ONNX/omnivoice-config.json", "Model Config")
             ),
-            requiredBytes = 3_200_000_000L // ~3,2 Go (backbone narrateur + decoder + encoder 624 Mo)
+            requiredBytes = 720_000_000L // ~720 Mo (decoder + encoder + config)
         )
     )
 
@@ -212,7 +208,8 @@ object ModelRepository {
 
                 Log.i(TAG, "Downloading: ${fileDef.downloadUrl}")
 
-                val success = downloadFile(fileDef.downloadUrl, targetFile, { fileProgress ->
+                val token = PrefsManager(context).hfToken
+                val error = downloadFileTo(fileDef.downloadUrl, targetFile, token, { fileProgress ->
                     val totalProgress = (filesDownloaded + fileProgress) / totalFiles
                     progressFlow.value = totalProgress
                 }) { errorMessage ->
@@ -222,7 +219,7 @@ object ModelRepository {
                     logErrorToFile(context, msg)
                 }
 
-                if (!success) {
+                if (error != null) {
                     Log.e(TAG, "Failed to download: ${fileDef.fileName}")
                     withContext(Dispatchers.Main) { onComplete(false) }
                     return@withContext
@@ -248,7 +245,19 @@ object ModelRepository {
         }
     }
 
-    private fun downloadFile(urlString: String, targetFile: File, onProgress: (Float) -> Unit, onError: (String) -> Unit): Boolean {
+    /**
+     * Télécharge un fichier avec suivi de redirections et en-tête
+     * d'authentification Bearer (uniquement vers huggingface.co).
+     * Retourne null en cas de succès, sinon un message d'erreur.
+     * Utilisé aussi par HfVoiceCatalog pour les voix du repo privé.
+     */
+    fun downloadFileTo(
+        urlString: String,
+        targetFile: File,
+        token: String,
+        onProgress: (Float) -> Unit,
+        onError: (String) -> Unit
+    ): String? {
         var connection: HttpURLConnection? = null
         try {
             var currentUrl = urlString
@@ -263,11 +272,11 @@ object ModelRepository {
                 connection.readTimeout = 120000  // 2 min timeout for large files
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("User-Agent", "NekoSpeak-TTS/1.0")
-                // Repo HF privé du narrateur : en-tête d'authentification. Envoyé
-                // uniquement vers huggingface.co, jamais vers la redirection CDN
-                // (les URLs presignées la rejettent sinon dans certains cas).
-                if (NARRATEUR_HF_TOKEN.isNotBlank() && currentUrl.startsWith("https://huggingface.co/")) {
-                    connection.setRequestProperty("Authorization", "Bearer $NARRATEUR_HF_TOKEN")
+                // Repo HF privé (voix fine-tunées) : en-tête d'authentification.
+                // Envoyé uniquement vers huggingface.co, jamais vers la
+                // redirection CDN (les URLs presignées la rejettent sinon).
+                if (token.isNotBlank() && currentUrl.startsWith("https://huggingface.co/")) {
+                    connection.setRequestProperty("Authorization", "Bearer $token")
                 }
                 connection.instanceFollowRedirects = false  // Handle redirects manually
 
@@ -283,12 +292,11 @@ object ModelRepository {
                         if (newUrl == null) {
                             Log.e(TAG, "Redirect without Location header")
                             onError("Redirection sans en-tête Location pour: $currentUrl")
-                            return false
+                            return "Redirection sans en-tête Location pour: $currentUrl"
                         }
                         // Résout les redirections RELATIVES (RFC 7231) contre l'URL courante.
                         // HuggingFace renvoie par ex. "/api/resolve-cache/..." pour les
                         // petits fichiers (config.json, manifests) : c'est légitime.
-                        // Ex: "Download failed at 80%" sur omnivoice-config.json.
                         val resolvedUrl = try {
                             URL(URL(currentUrl), newUrl).toString()
                         } catch (e: Exception) {
@@ -298,7 +306,7 @@ object ModelRepository {
                         if (resolvedUrl == null || !(resolvedUrl.startsWith("http://") || resolvedUrl.startsWith("https://"))) {
                             Log.e(TAG, "Refusing redirect with non-http scheme: $newUrl")
                             onError("Redirection refusée (schéma non http): $newUrl")
-                            return false
+                            return "Redirection refusée (schéma non http): $newUrl"
                         }
                         Log.d(TAG, "Redirecting to: $resolvedUrl")
                         currentUrl = resolvedUrl
@@ -306,9 +314,13 @@ object ModelRepository {
                         redirectCount++
                     }
                     else -> {
-                        Log.e(TAG, "HTTP error: $responseCode for $urlString")
-                        onError("Erreur HTTP $responseCode pour: $urlString")
-                        return false
+                        val msg = if (responseCode == 401 || responseCode == 403)
+                            "Accès refusé (HTTP $responseCode) — vérifiez le token HuggingFace dans les Réglages"
+                        else
+                            "Erreur HTTP $responseCode pour: $urlString"
+                        Log.e(TAG, msg)
+                        onError(msg)
+                        return msg
                     }
                 }
             }
@@ -316,7 +328,7 @@ object ModelRepository {
             if (redirectCount >= maxRedirects) {
                 Log.e(TAG, "Too many redirects for $urlString")
                 onError("Trop de redirections pour: $urlString")
-                return false
+                return "Trop de redirections pour: $urlString"
             }
 
             val contentLength = connection!!.contentLengthLong
@@ -341,13 +353,13 @@ object ModelRepository {
             }
 
             Log.i(TAG, "Downloaded ${bytesDownloaded / 1024}KB to ${targetFile.name}")
-            return true
+            return null
 
         } catch (e: Exception) {
             Log.e(TAG, "Download error: ${e.message}", e)
             onError("Exception: ${e.message}")
             targetFile.delete() // Clean up partial download
-            return false
+            return "Exception: ${e.message}"
         } finally {
             connection?.disconnect()
         }

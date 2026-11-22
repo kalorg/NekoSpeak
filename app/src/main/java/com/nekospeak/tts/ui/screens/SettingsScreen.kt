@@ -566,7 +566,39 @@ fun SettingsScreen(navController: NavController) {
             }
             
             HorizontalDivider()
-            
+
+            SettingsSection(title = "Voix HuggingFace (privé)") {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Text(
+                        "Token d'accès (périmètre « read ») au repo privé des voix fine-tunées. " +
+                        "Collez-le sous la forme hf_xxx... — il est stocké uniquement sur cet appareil.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    var hfToken by remember { mutableStateOf(prefs.hfToken) }
+                    OutlinedTextField(
+                        value = hfToken,
+                        onValueChange = {
+                            hfToken = it
+                            prefs.hfToken = it
+                        },
+                        label = { Text("HF token") },
+                        placeholder = { Text("hf_xxxxxxxx") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Sans token, seules les voix déjà installées sont disponibles.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
             SettingsSection(title = "Battery") {
                  SettingsItem(
                     title = "Disable Battery Optimization",

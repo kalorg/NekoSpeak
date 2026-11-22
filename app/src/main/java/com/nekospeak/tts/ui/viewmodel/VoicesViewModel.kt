@@ -26,6 +26,7 @@ data class Voice(
     val downloadProgress: Float = 0f,
     val metadata: com.nekospeak.tts.data.VoiceInfo? = null,
     val isCloned: Boolean = false, // True for user-cloned voices that can be deleted
+    val isHfVoice: Boolean = false, // Voix fine-tunée hébergée sur HuggingFace (privé)
     val modelType: String = ""      // Engine model ID: "kokoro_v1.0", "pocket_v1", "piper_...", "omnivoice", "kitten_nano"
 )
 
@@ -171,12 +172,77 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
             downloadCelebrityVoice(voice.id)
             return
         }
-        
+
+        // Handle HuggingFace fine-tuned voices
+        if (voice.isHfVoice) {
+            downloadHfVoice(voice)
+            return
+        }
+
         // Handle Piper voices
         val meta = voice.metadata ?: return
         viewModelScope.launch {
             voiceDownloader.downloadVoice(voice.id, meta.onnxUrl, meta.jsonUrl)
             refreshPiperStatuses() // Optimistic update
+        }
+    }
+
+    /**
+     * Télécharge une voix fine-tunée depuis le repo HuggingFace privé, avec
+     * progression en temps réel. Exige un token HF valide dans les Réglages.
+     */
+    fun downloadHfVoice(voice: Voice) {
+        viewModelScope.launch {
+            val token = PrefsManager(context).hfToken
+            if (token.isBlank()) {
+                _uiState.update {
+                    it.copy(cloneErrorMessage = "Ajoutez votre token HuggingFace dans Réglages pour télécharger les voix fine-tunées.")
+                }
+                return@launch
+            }
+
+            // Cherche le manifeste exact de la voix côté catalogue
+            val catalog = com.nekospeak.tts.data.HfVoiceCatalog.fetchCatalog(context, token)
+            val hv = catalog.firstOrNull { it.id == voice.id }
+            if (hv == null) {
+                _uiState.update {
+                    it.copy(cloneErrorMessage = "Voix '${voice.id}' introuvable sur HuggingFace.")
+                }
+                return@launch
+            }
+
+            setHfVoiceState(voice.id, com.nekospeak.tts.data.DownloadState.Downloading, 0f)
+
+            // Collecte de la progression pendant le téléchargement
+            val progressJob = launch {
+                com.nekospeak.tts.data.HfVoiceCatalog.downloadProgress.collect { map ->
+                    map[voice.id]?.let { p ->
+                        setHfVoiceState(voice.id, com.nekospeak.tts.data.DownloadState.Downloading, p)
+                    }
+                }
+            }
+
+            val error = com.nekospeak.tts.data.HfVoiceCatalog.downloadVoice(context, hv, token) { }
+            progressJob.cancel()
+
+            if (error == null) {
+                loadVoices() // rafraîchit : voix installée + onboardée au prochain init du moteur
+            } else {
+                android.util.Log.e("VoicesViewModel", "Échec du téléchargement HF '${voice.id}': $error")
+                setHfVoiceState(voice.id, com.nekospeak.tts.data.DownloadState.NotDownloaded, 0f)
+                _uiState.update { it.copy(cloneErrorMessage = error) }
+            }
+        }
+    }
+
+    /** Met à jour l'état de téléchargement d'une voix HF dans la liste courante. */
+    private fun setHfVoiceState(voiceId: String, state: com.nekospeak.tts.data.DownloadState, progress: Float) {
+        val updated = allVoices.map { v ->
+            if (v.id == voiceId) v.copy(downloadState = state, downloadProgress = progress) else v
+        }
+        if (updated != allVoices) {
+            allVoices = updated
+            applyFilters()
         }
     }
     
@@ -299,13 +365,57 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
 
+                    // Voix HF installées localement (fine-tunées) — état Downloaded
+                    val hfInstalled = com.nekospeak.tts.data.HfVoiceCatalog.installedVoices(context)
+                    val hfInstalledVoices = hfInstalled.map { hv ->
+                        Voice(
+                            id = hv.id,
+                            name = hv.name,
+                            language = hv.language.ifBlank { "fr-fr" },
+                            gender = hv.gender.ifBlank { "Neutral" },
+                            region = "Fine-tunée",
+                            downloadState = com.nekospeak.tts.data.DownloadState.Downloaded,
+                            isCloned = true, // autorise la suppression (supprime le dossier HF)
+                            isHfVoice = true,
+                            modelType = "omnivoice"
+                        )
+                    }
+
+                    // Catalogue distant HuggingFace : voix pas encore installées
+                    val hfToken = PrefsManager(context).hfToken
+                    val hfCatalog = if (hfToken.isNotBlank()) {
+                        try {
+                            com.nekospeak.tts.data.HfVoiceCatalog.fetchCatalog(context, hfToken)
+                        } catch (e: Exception) {
+                            android.util.Log.w("VoicesViewModel", "Catalogue HF inaccessible: ${e.message}")
+                            emptyList()
+                        }
+                    } else emptyList()
+                    val hfRemoteVoices = hfCatalog
+                        .filter { hv -> hfInstalled.none { it.id == hv.id } }
+                        .map { hv ->
+                            Voice(
+                                id = hv.id,
+                                name = hv.name,
+                                language = hv.language.ifBlank { "fr-fr" },
+                                gender = hv.gender.ifBlank { "Neutral" },
+                                region = "Fine-tunée",
+                                downloadState = com.nekospeak.tts.data.DownloadState.NotDownloaded,
+                                isHfVoice = true,
+                                modelType = "omnivoice"
+                            )
+                        }
+
                     // OmniVoice cloned voices from local storage
+                    // (les voix HF onboardées y sont persistées aussi → exclure pour ne pas dupliquer)
+                    val hfIds = hfInstalled.map { it.id }.toSet()
                     val clonedVoices = mutableListOf<Voice>()
                     val clonedDir = File(context.filesDir, "omnivoice/cloned_voices")
                     if (clonedDir.exists()) {
                         clonedDir.listFiles()?.filter { it.extension == "bin" }?.forEach { file ->
                             try {
                                 val name = file.nameWithoutExtension
+                                if (name in hfIds) return@forEach
                                 clonedVoices.add(
                                     Voice(
                                         id = name,
@@ -324,7 +434,7 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
 
-                    presetVoices + clonedVoices
+                    presetVoices + hfInstalledVoices + hfRemoteVoices + clonedVoices
                 }
                 else -> kokoroVoices
             }
@@ -539,7 +649,7 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
         return when {
             lang.contains("tamil") || lang.contains("ta_in") -> "வணக்கம், நான் NekoSpeak."
             lang.contains("spanish") || lang.contains("es_") -> "Hola, soy NekoSpeak."
-            lang.contains("french") || lang.contains("fr_") -> "Bonjour, je suis NekoSpeak."
+            lang.contains("french") || lang.contains("fr_") || lang.startsWith("fr") -> "Bonjour, je suis NekoSpeak."
             lang.contains("german") || lang.contains("de_") -> "Hallo, ich bin NekoSpeak."
             lang.contains("japanese") || lang.contains("ja_") -> "こんにちは、NekoSpeakです。"
             lang.contains("chinese") || lang.contains("zh_") -> "你好，我是NekoSpeak。"
@@ -653,19 +763,25 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteClonedVoice(voiceId: String) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                // Delete the voice file
+                // Voix HF fine-tunée : supprime le dossier complet (~2,4 Go)
+                com.nekospeak.tts.data.HfVoiceCatalog.deleteVoice(context, voiceId)
+
+                // Supprime aussi le .bin cloné (référence encodée) éventuel
                 val voiceFile = File(context.filesDir, "pocket/cloned_voices/$voiceId.bin")
                 if (voiceFile.exists()) {
                     voiceFile.delete()
-                    android.util.Log.i("VoicesViewModel", "Deleted cloned voice: $voiceId")
                 }
-                
+                val omnivoiceBin = File(context.filesDir, "omnivoice/cloned_voices/$voiceId.bin")
+                if (omnivoiceBin.exists()) {
+                    omnivoiceBin.delete()
+                }
+
                 // Also delete cached embedding if exists
                 val cacheFile = File(context.cacheDir, "pocket/$voiceId.emb")
                 if (cacheFile.exists()) {
                     cacheFile.delete()
                 }
-                
+
                 // Refresh the voice list
                 loadVoices()
             } catch (e: Exception) {

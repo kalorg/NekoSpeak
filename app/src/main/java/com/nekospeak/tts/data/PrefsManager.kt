@@ -27,6 +27,7 @@ class PrefsManager(context: Context) {
         private const val KEY_OMNIVOICE_CFG = "omnivoice_guidance_scale"
         private const val KEY_OMNIVOICE_TSHIFT = "omnivoice_t_shift"
         private const val KEY_FR_MIGRATION = "fr_migration_done"
+        private const val KEY_HF_TOKEN = "hf_token"
     }
 
     // Reactive counter for theme updates
@@ -129,4 +130,13 @@ class PrefsManager(context: Context) {
     var omnivoiceTShift: Float
         get() = prefs.getFloat(KEY_OMNIVOICE_TSHIFT, 0.8f)
         set(value) = prefs.edit().putFloat(KEY_OMNIVOICE_TSHIFT, value).apply()
+
+    /**
+     * Token HuggingFace (périmètre « read ») donnant accès au repo privé des
+     * voix fine-tunées. Saisi dans Réglages, jamais compilé dans l'app : on
+     * peut l'expirer ou le remplacer sans republier l'application.
+     */
+    var hfToken: String
+        get() = prefs.getString(KEY_HF_TOKEN, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_HF_TOKEN, value.trim()).apply()
 }
