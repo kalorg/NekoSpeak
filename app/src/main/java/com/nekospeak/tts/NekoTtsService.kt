@@ -197,6 +197,7 @@ class NekoTtsService : TextToSpeechService() {
         }
         serviceScope.cancel()
         Log.i(TAG, "NekoTtsService destroyed")
+        SupportLogStore.log(this, TAG, "onDestroy : service détruit, moteur libéré")
     }
 
     override fun onIsLanguageAvailable(lang: String?, country: String?, variant: String?): Int {
@@ -393,6 +394,7 @@ class NekoTtsService : TextToSpeechService() {
     override fun onStop() {
         Log.d(TAG, "onStop called")
         stopRequested = true
+        SupportLogStore.log(this, TAG, "onStop : arrêt demandé (nouvelle lecture ou stop client)")
         // Request engine to stop current generation
         currentEngine?.stop()
     }
@@ -566,6 +568,7 @@ class NekoTtsService : TextToSpeechService() {
 
         } catch (e: Exception) {
             Log.e(TAG, "[$reqId] Synthesis error", e)
+            SupportLogStore.log(this, TAG, "[$reqId] Synthesis error: ${e.message}", e)
             callback.error()
         }
     }

@@ -233,7 +233,12 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                 // 3. Process each sentence
                 for (sentence in sentences) {
-                    if (stopRequested) break
+                    if (stopRequested) {
+                        com.nekospeak.tts.support.SupportLogStore.log(
+                            context, TAG, "Generate: arrêt demandé avant le traitement de la phrase"
+                        )
+                        break
+                    }
                     if (sentence.isBlank()) continue
 
                     Log.d(TAG, "Processing: \"${sentence.take(60)}...\"")
@@ -266,8 +271,13 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                         guidanceScale = prefs.omnivoiceGuidanceScale,
                         seed = seed
                     )
-
-                    if (stopRequested) break
+                    if (stopRequested) {
+                        com.nekospeak.tts.support.SupportLogStore.log(
+                            context, TAG,
+                            "Generate: arrêt demandé après la diffusion — audio non décodé"
+                        )
+                        break
+                    }
 
                     // 3f. Decode audio tokens to PCM
                     val rawPcm = decodeTokens(audioTokens, numTargetTokens, decoderSess, env)
@@ -487,10 +497,18 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             throw IllegalStateException("Backbone introuvable pour la voix '${voice.id}'")
         }
         Log.i(TAG, "Loading backbone for voice '${voice.id}'...")
+        com.nekospeak.tts.support.SupportLogStore.log(
+            context, TAG,
+            "Loading backbone '${voice.id}' (${hfVoices.size} voix HF connues)..."
+        )
         val opts = OrtModelLoader.createSessionOptions(threadCount = 4)
         val session = OrtModelLoader.loadModel(env, graphFile, opts)
         mainSessions[voice.id] = session
         Log.i(TAG, "Backbone '${voice.id}' loaded (${hfVoices.size} voice(s) installée(s))")
+        com.nekospeak.tts.support.SupportLogStore.log(
+            context, TAG,
+            "Backbone '${voice.id}' loaded"
+        )
         return session
     }
 
@@ -518,11 +536,19 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val refFile = File(dir, voice.refAudioFile)
                 if (!refFile.exists() || refFile.length() < 1024) {
                     Log.w(TAG, "Référence absente pour la voix '${voice.id}' — pas d'onboarding")
+                    com.nekospeak.tts.support.SupportLogStore.log(
+                        context, TAG,
+                        "HF onboarding: référence absente pour '${voice.id}' (${refFile.length()} octets)"
+                    )
                     continue
                 }
                 val pcm = readWavAsFloat32(refFile.absolutePath)
                 if (pcm.isEmpty()) {
                     Log.e(TAG, "Référence illisible pour '${voice.id}' — onboarding abandonné")
+                    com.nekospeak.tts.support.SupportLogStore.log(
+                        context, TAG,
+                        "HF onboarding: référence illisible pour '${voice.id}' (WAV vide ou corrompu, ${refFile.length()} octets)"
+                    )
                     continue
                 }
                 val hopLength = 960
@@ -531,7 +557,14 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                 val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
                 val result = enc.run(mapOf("input_values" to inputTensor))
-                val codesTensor = result["audio_codes"] as? OnnxTensor ?: continue
+                val codesTensor = result["audio_codes"] as? OnnxTensor
+                if (codesTensor == null) {
+                    com.nekospeak.tts.support.SupportLogStore.log(
+                        context, TAG,
+                        "HF onboarding: sortie 'audio_codes' absente pour '${voice.id}' (sorties encodeur: ${result.keys.joinToString()})"
+                    )
+                    continue
+                }
                 @Suppress("UNCHECKED_CAST")
                 val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
                 val Cb = codesData[0].size
@@ -544,6 +577,11 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 saveClonedVoice(cloned)
                 Log.i(TAG, "Voix HF '${voice.id}' onboardée ($Cb codebooks, $T tokens, " +
                     "%.1fs)".format(durationSec))
+                com.nekospeak.tts.support.SupportLogStore.log(
+                    context, TAG,
+                    "HF onboarding OK: '${voice.id}' ($Cb codebooks, $T tokens, " +
+                        "%.1fs)".format(durationSec)
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Échec de l'onboarding de la voix HF '${voice.id}'", e)
                 com.nekospeak.tts.support.SupportLogStore.log(
