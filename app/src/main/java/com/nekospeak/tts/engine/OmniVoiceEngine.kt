@@ -561,7 +561,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 if (codesTensor == null) {
                     com.nekospeak.tts.support.SupportLogStore.log(
                         context, TAG,
-                        "HF onboarding: sortie 'audio_codes' absente pour '${voice.id}' (sorties encodeur: ${result.keys.joinToString()})"
+                        "HF onboarding: sortie 'audio_codes' absente pour '${voice.id}' (sorties encodeur: ${result.joinToString { it.key }})"
                     )
                     continue
                 }
