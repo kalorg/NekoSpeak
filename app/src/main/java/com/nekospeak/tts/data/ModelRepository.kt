@@ -36,6 +36,14 @@ object ModelRepository {
     private const val TAG = "ModelRepository"
 
     private const val HF_BASE = "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/main"
+
+    // Backbone narrateur (LoRA fine-tuné « voix narrateur FR ») : repo HF privé.
+    // Décodeur Higgs, encodeur de clonage, config et manifest restent sur Gigsu.
+    private const val NARRATEUR_HF_BASE = "https://huggingface.co/michaelpruvost/narrateur-vocoloco/resolve/main"
+
+    // Token HF (périmètre « read ») pour télécharger le repo privé ci-dessus.
+    // À coller sous la forme hf_xxx... — NE PAS publier ce token dans un dépôt public.
+    private const val NARRATEUR_HF_TOKEN = ""
     private const val BUNDLE = "onnx/french_24l"
     private const val VOICES_BASE = "https://huggingface.co/kyutai/tts-voices/resolve/main"
 
@@ -91,21 +99,16 @@ object ModelRepository {
         ),
         ModelInfo(
             id = "omnivoice",
-            name = "OmniVoice (Diffusion TTS)",
-            description = "600+ language multilingual TTS with voice cloning. 2.3GB main model + 83MB decoder. Optional 624MB encoder for voice cloning. ~3GB total download.",
+            name = "OmniVoice Narrateur (LoRA FR)",
+            description = "TTS diffusion multilingue, backbone fine-tuné « voix narrateur » (LoRA, français). 2,4GB backbone + 83MB decoder. Optional 624MB encoder for voice cloning. ~3,2GB total download.",
             files = listOf(
-                ModelFile("omnivoice/omnivoice-main-split.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main-split.onnx", "Main Model Graph (1MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data_00", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main.onnx_data_00", "Main Model Shard 1/5 (592MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data_01", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main.onnx_data_01", "Main Model Shard 2/5 (488MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data_02", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main.onnx_data_02", "Main Model Shard 3/5 (492MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data_03", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main.onnx_data_03", "Main Model Shard 4/5 (500MB)"),
-                ModelFile("omnivoice/omnivoice-main.onnx_data_04", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main.onnx_data_04", "Main Model Shard 5/5 (264MB)"),
+                ModelFile("omnivoice/omnivoice-main-split.onnx", "$NARRATEUR_HF_BASE/omnivoice-main-split.onnx", "Backbone narrateur — graphe (1MB)"),
+                ModelFile("omnivoice/omnivoice-main.onnx_data", "$NARRATEUR_HF_BASE/omnivoice-main.onnx_data", "Backbone narrateur — poids fp32 (2,4GB)"),
                 ModelFile("omnivoice/omnivoice-decoder.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-decoder.onnx", "Audio Decoder (83MB)"),
                 ModelFile("omnivoice/omnivoice-encoder-fixed.onnx", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-encoder-fixed.onnx", "Audio Encoder - Voice Cloning (624MB)"),
-                ModelFile("omnivoice/omnivoice-config.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-config.json", "Model Config"),
-                ModelFile("omnivoice/omnivoice-main-manifest.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-main-manifest.json", "Shard Manifest")
+                ModelFile("omnivoice/omnivoice-config.json", "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main/omnivoice-config.json", "Model Config")
             ),
-            requiredBytes = 3_300_000_000L // ~3,3 Go (shards + decoder + encoder 624 Mo)
+            requiredBytes = 3_200_000_000L // ~3,2 Go (backbone narrateur + decoder + encoder 624 Mo)
         )
     )
 
@@ -260,6 +263,12 @@ object ModelRepository {
                 connection.readTimeout = 120000  // 2 min timeout for large files
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("User-Agent", "NekoSpeak-TTS/1.0")
+                // Repo HF privé du narrateur : en-tête d'authentification. Envoyé
+                // uniquement vers huggingface.co, jamais vers la redirection CDN
+                // (les URLs presignées la rejettent sinon dans certains cas).
+                if (NARRATEUR_HF_TOKEN.isNotBlank() && currentUrl.startsWith("https://huggingface.co/")) {
+                    connection.setRequestProperty("Authorization", "Bearer $NARRATEUR_HF_TOKEN")
+                }
                 connection.instanceFollowRedirects = false  // Handle redirects manually
 
                 val responseCode = connection.responseCode
