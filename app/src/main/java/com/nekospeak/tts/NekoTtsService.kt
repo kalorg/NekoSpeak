@@ -163,6 +163,11 @@ class NekoTtsService : TextToSpeechService() {
                     // Return null to indicate failure
                     null
                 }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                // Annulation volontaire (rebind du service, reloadEngine) :
+                // pas un crash, ne pas polluer les logs.
+                Log.i(TAG, "InitJob cancelled (benign)")
+                throw ce
             } catch (t: Throwable) {
                 Log.e(TAG, "CRITICAL: InitJob crashed", t)
                 SupportLogStore.log(applicationContext, TAG, "Engine initialization crashed", t)
@@ -400,22 +405,54 @@ class NekoTtsService : TextToSpeechService() {
             return
         }
 
-        // Wait for engine init with short timeout (don't block binder thread long)
+        // Wait for engine init. Tolerates concurrent reloads/rebinds: if the
+        // awaited init job is cancelled (Service rebinding, pref-triggered
+        // reloadEngine), follow the NEWEST job instead of failing.
         val engine = runBlocking {
-            try {
+            val deadline = System.currentTimeMillis() + INIT_TIMEOUT_MS
+            var waitedJob: kotlinx.coroutines.Deferred<TtsEngine?>? = null
+            while (System.currentTimeMillis() < deadline) {
                 val job = initJob
-                if (job == null) {
-                    Log.e(TAG, "[$reqId] InitJob is null!")
-                    return@runBlocking currentEngine  // Try current engine
+                when {
+                    job == null -> {
+                        // No init in flight: trigger one (first synthesis after
+                        // a fresh bind, or after a crash of the previous init)
+                        Log.i(TAG, "[$reqId] InitJob is null, triggering init...")
+                        reloadEngine()
+                    }
+                    job === waitedJob -> {
+                        // Same job already awaited: give it time to finish or
+                        // be replaced. If it was cancelled and nothing new
+                        // comes, stop quickly rather than spinning 30s.
+                        if (job.isCancelled) {
+                            kotlinx.coroutines.delay(200)
+                            if (initJob === job) {
+                                Log.e(TAG, "[$reqId] InitJob cancelled without successor")
+                                break
+                            }
+                        } else {
+                            kotlinx.coroutines.delay(100)
+                        }
+                    }
+                    else -> {
+                        try {
+                            kotlinx.coroutines.withTimeoutOrNull(
+                                deadline - System.currentTimeMillis()
+                            ) { job.await() }
+                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                            // Job cancelled mid-flight (reload/rebind): the
+                            // next loop iteration picks up the new job.
+                            Log.i(TAG, "[$reqId] InitJob cancelled, following next one")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[$reqId] Error waiting for engine init", e)
+                        }
+                        val eng = currentEngine
+                        if (eng != null && eng.isInitialized()) return@runBlocking eng
+                        waitedJob = job
+                    }
                 }
-
-                kotlinx.coroutines.withTimeoutOrNull(INIT_TIMEOUT_MS) {
-                    job.await()
-                } ?: currentEngine  // If timeout, try current engine
-            } catch (e: Exception) {
-                Log.e(TAG, "[$reqId] Error waiting for engine init", e)
-                currentEngine  // Fall back to current engine
             }
+            currentEngine // timeout: best effort
         }
 
         if (engine == null || !engine.isInitialized()) {
