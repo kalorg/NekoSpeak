@@ -227,7 +227,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val sentences = SentenceBuffer(minChars = 20, maxChars = 250) { }.split(text)
                 com.nekospeak.tts.support.SupportLogStore.log(
                     context, TAG,
-                    "Generate: voice=$voice, lang=$lang, ${sentences.size} sentence(s), ref=${clonedVoice?.id ?: "none"}"
+                    "Generate: voice=$voice, lang=$lang, ${sentences.size} sentence(s), ref=${clonedVoice?.name ?: "none"}"
                 )
                 Log.d(TAG, "Split into ${sentences.size} sentences, voice=$voice, lang=$lang")
 
