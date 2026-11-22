@@ -349,8 +349,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val result = enc.run(mapOf("input_values" to inputTensor))
 
                 // Extract audio codes [1, C, T]
-                val codesResult = result["audio_codes"] ?: return@withContext null
-                val codesTensor = codesResult as? OnnxTensor ?: return@withContext null
+                val codesTensor = outputTensor(result, "audio_codes") ?: return@withContext null
                 val shape = codesTensor.info.shape
                 val T = shape[2].toInt()
                 val C = shape[1].toInt()
@@ -557,7 +556,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                 val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
                 val result = enc.run(mapOf("input_values" to inputTensor))
-                val codesTensor = result["audio_codes"] as? OnnxTensor
+                val codesTensor = outputTensor(result, "audio_codes")
                 if (codesTensor == null) {
                     com.nekospeak.tts.support.SupportLogStore.log(
                         context, TAG,
@@ -832,8 +831,14 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 "attention_mask" to attnTensor
             ))
 
-            val logitsResult = results["audio_logits"] ?: break
-            val logitsTensor = logitsResult as? OnnxTensor ?: break
+            val logitsTensor = outputTensor(results, "audio_logits")
+            if (logitsTensor == null) {
+                com.nekospeak.tts.support.SupportLogStore.log(
+                    context, TAG,
+                    "Diffusion: sortie 'audio_logits' absente à l'étape ${step + 1}/$numSteps (sorties: ${results.joinToString { it.key }})"
+                )
+                break
+            }
             @Suppress("UNCHECKED_CAST")
             val logits = logitsTensor.value as Array<Array<Array<FloatArray>>>
             // logits shape: [2, C, maxLen, V]
@@ -988,6 +993,22 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     // Internal: audio decoding
     // ========================================================================
 
+    /**
+     * Récupère un tenseur de sortie par nom, compatible onnxruntime 1.18 :
+     * Result.get(name) retourne un Optional<OnnxValue> ; l'opérateur []
+     * donne l'Optional lui-même, ce qui faisait échouer silencieusement
+     * tous les « as? OnnxTensor » directs (onboarding HF, diffusion,
+     * décodage) : diffusion stoppée à la 1re étape, tokens restés au mask
+     * 1024, puis ORT_INVALID_ARGUMENT (Gather) au décodage.
+     */
+    private fun outputTensor(result: OrtSession.Result, name: String): OnnxTensor? {
+        return try {
+            result.get(name).orElse(null) as? OnnxTensor
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun decodeTokens(
         tokens: LongArray,
         numTargetTokens: Int,
@@ -998,13 +1019,27 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         val codes = LongArray(C * numTargetTokens)
         System.arraycopy(tokens, 0, codes, 0, min(tokens.size, codes.size))
 
+        // Défensif : le décodeur Higgs accepte audio_codes dans [0, 1023]
+        // (table Gather de 1024 entrées). Un id hors bornes (ex : mask 1024
+        // résiduel) plantait ORT_INVALID_ARGUMENT en plein décodage.
+        var outOfRange = 0
+        for (i in codes.indices) {
+            val v = codes[i]
+            if (v < 0 || v > 1023) { codes[i] = 0; outOfRange++ }
+        }
+        if (outOfRange > 0) {
+            com.nekospeak.tts.support.SupportLogStore.log(
+                context, TAG,
+                "decodeTokens: $outOfRange token(s) hors bornes remis à 0 (mask/stop résiduels)"
+            )
+        }
+
         // Le décodeur Higgs attend audio_codes de rang (1,C,T) et sort (1,1,N)
         val nested = Array(1) { Array(C) { c -> LongArray(numTargetTokens) } }
         for (c in 0 until C) System.arraycopy(codes, c * numTargetTokens, nested[0][c], 0, numTargetTokens)
         val codesTensor = OnnxTensor.createTensor(env, nested)
         val result = session.run(mapOf("audio_codes" to codesTensor))
-        val audioResult = result["audio_values"] ?: return FloatArray(0)
-        val audioTensor = audioResult as? OnnxTensor ?: return FloatArray(0)
+        val audioTensor = outputTensor(result, "audio_values") ?: return FloatArray(0)
 
         @Suppress("UNCHECKED_CAST")
         val values = audioTensor.value as Array<Array<FloatArray>>
