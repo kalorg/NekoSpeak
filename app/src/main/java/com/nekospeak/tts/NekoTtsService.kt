@@ -133,6 +133,7 @@ class NekoTtsService : TextToSpeechService() {
             try {
                 val prefs = com.nekospeak.tts.data.PrefsManager(applicationContext)
                 val modelType = prefs.currentModel
+                com.nekospeak.tts.data.EngineInitState.initializing(modelType)
 
                 val newEngine = com.nekospeak.tts.engine.EngineFactory.createEngine(applicationContext, modelType)
 
@@ -141,6 +142,7 @@ class NekoTtsService : TextToSpeechService() {
 
                 if (newEngine.initialize()) {
                     Log.i(TAG, "Engine initialized successfully.")
+                    com.nekospeak.tts.data.EngineInitState.ready(modelType)
                     SupportLogStore.log(applicationContext, TAG, "Engine initialized successfully for model=$modelType")
 
                     // Acquire mutex before swapping engines
@@ -158,6 +160,7 @@ class NekoTtsService : TextToSpeechService() {
                     newEngine
                 } else {
                     Log.e(TAG, "Engine initialization FAILED. Keeping old engine if available.")
+                    com.nekospeak.tts.data.EngineInitState.failed(modelType)
                     SupportLogStore.log(applicationContext, TAG, "Engine initialization failed for model=$modelType")
                     // DON'T swap engines on failure - keep the old working engine
                     // Return null to indicate failure
@@ -170,6 +173,10 @@ class NekoTtsService : TextToSpeechService() {
                 throw ce
             } catch (t: Throwable) {
                 Log.e(TAG, "CRITICAL: InitJob crashed", t)
+                com.nekospeak.tts.data.EngineInitState.failed(
+                    com.nekospeak.tts.data.PrefsManager(applicationContext).currentModel,
+                    t.message
+                )
                 SupportLogStore.log(applicationContext, TAG, "Engine initialization crashed", t)
                 // Don't swap on exception either
                 null

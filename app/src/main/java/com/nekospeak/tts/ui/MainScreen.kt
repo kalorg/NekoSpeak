@@ -1,24 +1,38 @@
 package com.nekospeak.tts.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -63,7 +77,9 @@ fun MainScreen() {
         },
         contentWindowInsets = WindowInsets.navigationBars
     ) { innerPadding ->
-        NavHost(
+        Column(modifier = Modifier.padding(innerPadding)) {
+            EngineStateBanner()
+            NavHost(
             navController = navController,
             startDestination = startDestination,
             modifier = Modifier.padding(innerPadding)
@@ -95,6 +111,93 @@ fun MainScreen() {
             
             composable(Screen.ModelManager.route) {
                 com.nekospeak.tts.ui.screens.ModelManagerScreen(navController = navController)
+            }
+        }
+        }
+    }
+}
+
+/**
+ * Bandeau d'état du moteur TTS : visible pendant l'initialisation (progression),
+ * 5 secondes après le passage en « prêt », et en cas d'échec (persistant).
+ * Alimenté par NekoTtsService via EngineInitState.
+ */
+@Composable
+fun EngineStateBanner() {
+    val state by com.nekospeak.tts.data.EngineInitState.state.collectAsState()
+    var showReady by remember { mutableStateOf(false) }
+
+    // « Moteur prêt » reste affiché 5 s puis s'efface
+    LaunchedEffect(state.changedAt) {
+        if (state.status == com.nekospeak.tts.data.EngineInitState.Status.READY) {
+            showReady = true
+            kotlinx.coroutines.delay(5000)
+            showReady = false
+        } else {
+            showReady = false
+        }
+    }
+
+    val visible = when (state.status) {
+        com.nekospeak.tts.data.EngineInitState.Status.INITIALIZING -> true
+        com.nekospeak.tts.data.EngineInitState.Status.FAILED -> true
+        com.nekospeak.tts.data.EngineInitState.Status.READY -> showReady
+        com.nekospeak.tts.data.EngineInitState.Status.IDLE -> false
+    }
+
+    AnimatedVisibility(visible = visible) {
+        Surface(
+            color = when (state.status) {
+                com.nekospeak.tts.data.EngineInitState.Status.FAILED ->
+                    MaterialTheme.colorScheme.errorContainer
+                com.nekospeak.tts.data.EngineInitState.Status.READY ->
+                    Color(0xFF1B5E20)
+                else -> Color(0xFF37474F)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    when (state.status) {
+                        com.nekospeak.tts.data.EngineInitState.Status.READY ->
+                            Icon(Icons.Default.CheckCircle, contentDescription = null,
+                                tint = Color.White)
+                        com.nekospeak.tts.data.EngineInitState.Status.FAILED ->
+                            Icon(Icons.Default.Error, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer)
+                        else -> androidx.compose.material3.CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(18.dp)
+                        )
+                    }
+                    Text(
+                        text = when (state.status) {
+                            com.nekospeak.tts.data.EngineInitState.Status.INITIALIZING ->
+                                "Préparation du moteur (${state.model})…"
+                            com.nekospeak.tts.data.EngineInitState.Status.READY ->
+                                "Moteur prêt (${state.model})"
+                            com.nekospeak.tts.data.EngineInitState.Status.FAILED ->
+                                "Échec d'initialisation du moteur" +
+                                    (state.message?.let { " : $it" } ?: "")
+                            else -> ""
+                        },
+                        color = if (state.status == com.nekospeak.tts.data.EngineInitState.Status.FAILED)
+                            MaterialTheme.colorScheme.onErrorContainer else Color.White,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+                if (state.status == com.nekospeak.tts.data.EngineInitState.Status.INITIALIZING) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
