@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.NavigationBar
@@ -168,7 +168,7 @@ fun EngineStateBanner() {
                             Icon(Icons.Default.CheckCircle, contentDescription = null,
                                 tint = Color.White)
                         com.nekospeak.tts.data.EngineInitState.Status.FAILED ->
-                            Icon(Icons.Default.Error, contentDescription = null,
+                            Icon(Icons.Default.Warning, contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onErrorContainer)
                         else -> androidx.compose.material3.CircularProgressIndicator(
                             color = Color.White,
