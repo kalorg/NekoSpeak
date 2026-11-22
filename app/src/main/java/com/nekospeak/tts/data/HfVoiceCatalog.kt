@@ -136,8 +136,8 @@ object HfVoiceCatalog {
     }
 
     /**
-     * Voix installées : scan des dossiers locaux hf_voices/*/ avec voice.json
-     * valide et fichiers complets. Fonctionne hors ligne.
+     * Voix installées : scan des dossiers locaux hf_voices (un par voix)
+     * avec voice.json valide et fichiers complets. Fonctionne hors ligne.
      */
     fun installedVoices(context: Context): List<HfVoice> {
         val root = voicesRoot(context)
