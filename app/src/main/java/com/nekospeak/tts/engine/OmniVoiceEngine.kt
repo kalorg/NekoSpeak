@@ -559,19 +559,56 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     // Internal: text tokenization
     // ========================================================================
 
-    /** Language detection from text content (used for style tokens). */
+    /**
+     * Language detection from text content (used for style tokens).
+     *
+     * Le tag de langue du bloc style doit correspondre à la langue du TEXTE :
+     * le LoRA narrateur a été entraîné avec « fr » sur du texte français
+     * (80 % « fr », 20 % « None », jamais « en » sur du français). L'ancienne
+     * version renvoyait « en » pour tout texte latin → hors distribution.
+     *
+     * Ordre : écritures non latines (fiables, jeux de caractères disjoints),
+     * puis diacritiques latins, puis mots-outils, anglais par défaut.
+     */
     private fun detectLanguage(text: String): String {
-        val hasCjk = text.any { it.code in 0x4E00..0x9FFF || it.code in 0x3040..0x309F }
+        val hasKana = text.any { it.code in 0x3040..0x30FF }
+        val hasHan = text.any { it.code in 0x4E00..0x9FFF }
         val hasHangul = text.any { it.code in 0xAC00..0xD7AF }
         val hasArabic = text.any { it.code in 0x0600..0x06FF }
         val hasCyrillic = text.any { it.code in 0x0400..0x04FF }
-        return when {
-            hasCjk -> "zh"
-            hasHangul -> "ko"
-            hasArabic -> "ar"
-            hasCyrillic -> "ru"
-            else -> "en"
+        if (hasKana) return "ja"
+        if (hasHan) return "zh"
+        if (hasHangul) return "ko"
+        if (hasArabic) return "ar"
+        if (hasCyrillic) return "ru"
+
+        // Latin : diacritiques d'abord. ñ/¿/¡ sont uniquement espagnols, le é est
+        // partagé fr/es → l'espagnol unique passe avant le français.
+        if (text.any { it in "ñ¿¡Ñ" }) return "es"
+        val hasFrench = text.any {
+            it in "àâéèêëîïôùûçœÀÂÉÈÊËÎÏÔÙÛÇŒ"
         }
+        if (hasFrench) return "fr"
+        if (text.any { it in "áíóúÁÍÓÚ" }) return "es"
+        if (text.any { it in "äöüßÄÖÜ" }) return "de"
+
+        // Texte latin sans diacritiques : mots-outils (français puis anglais)
+        // (normalise l'apostrophe typographique « l' » -> « l' »)
+        val padded = (" " + text.lowercase() + " ").replace('\u2019', '\'')
+        val frenchStopwords = listOf(
+            " le ", " la ", " les ", " des ", " une ", " du ", " et ", " est ",
+            " dans ", " pour ", " pas ", " que ", " qui ", " au ", " ne ",
+            " l'", " d'", " qu'", " s'", " n'"
+        )
+        if (frenchStopwords.any { padded.contains(it) }) return "fr"
+
+        val englishStopwords = listOf(
+            " the ", " and ", " of ", " to ", " in ", " is ", " was ", " for ",
+            " you ", " that ", " with ", " this "
+        )
+        if (englishStopwords.any { padded.contains(it) }) return "en"
+
+        return "en" // défaut : cohérent avec le pré-entraînement de base
     }
 
     // ========================================================================
