@@ -500,6 +500,11 @@ class NekoTtsService : TextToSpeechService() {
         val sampleRate = engine.getSampleRate()
 
         Log.i(TAG, "[$reqId] Starting synthesis. Voice: $voiceToUse, Rate: $speechRate, SampleRate: $sampleRate")
+        SupportLogStore.log(this, TAG, "[$reqId] Synthesis requested: model=${prefs.currentModel}, voice=$voiceToUse, ${text.length} chars")
+
+        // Compteur d'octets envoyés (diagnostic : distingue « audio produit mais
+        // pas joué par le client » de « aucun audio produit »)
+        var bytesSent = 0
 
         // Start audio stream with engine's sample rate
         callback.start(
@@ -529,6 +534,7 @@ class NekoTtsService : TextToSpeechService() {
 
                         // Convert float samples to PCM 16-bit bytes (with rounding for quality)
                         val bytes = floatToPcm16(samples)
+                        bytesSent += bytes.size
 
                         // Stream audio in chunks
                         val maxBufferSize = callback.maxBufferSize
@@ -550,6 +556,7 @@ class NekoTtsService : TextToSpeechService() {
 
             // Always call done() to signal completion to the system
             callback.done()
+            SupportLogStore.log(this, TAG, "[$reqId] Synthesis done: $bytesSent audio bytes sent")
 
             if (stopRequested) {
                 Log.i(TAG, "[$reqId] Synthesis stopped by request")

@@ -225,6 +225,10 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                 // 2. Split text into sentences
                 val sentences = SentenceBuffer(minChars = 20, maxChars = 250) { }.split(text)
+                com.nekospeak.tts.support.SupportLogStore.log(
+                    context, TAG,
+                    "Generate: voice=$voice, lang=$lang, ${sentences.size} sentence(s), ref=${clonedVoice?.id ?: "none"}"
+                )
                 Log.d(TAG, "Split into ${sentences.size} sentences, voice=$voice, lang=$lang")
 
                 // 3. Process each sentence
@@ -270,6 +274,10 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                     // 3g. Post-process: trim silence, normalize
                     val pcm = postProcessAudio(rawPcm)
+                    com.nekospeak.tts.support.SupportLogStore.log(
+                        context, TAG,
+                        "Sentence: ${pcm.size} samples (${pcm.size / SAMPLE_RATE}s), tokens=$numTargetTokens"
+                    )
 
                     callback(pcm)
                 }
@@ -496,6 +504,10 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     private fun ensureHfVoices() {
         val enc = encoderSession ?: run {
             Log.w(TAG, "Encoder absent — voix HF non onboardées (clonage micro indisponible)")
+            com.nekospeak.tts.support.SupportLogStore.log(
+                context, TAG,
+                "HF onboarding: ENCODER ABSENT, ${hfVoices.size} voice(s) pas onboardée(s)"
+            )
             return
         }
         val env = ortEnv ?: return
@@ -534,8 +546,16 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                     "%.1fs)".format(durationSec))
             } catch (e: Exception) {
                 Log.e(TAG, "Échec de l'onboarding de la voix HF '${voice.id}'", e)
+                com.nekospeak.tts.support.SupportLogStore.log(
+                    context, TAG,
+                    "HF onboarding FAILED for '${voice.id}': ${e.message}", e
+                )
             }
         }
+        com.nekospeak.tts.support.SupportLogStore.log(
+            context, TAG,
+            "HF onboarding: ${clonedVoices.keys.joinToString()} (${clonedVoices.size} clone(s) actifs)"
+        )
     }
 
     private fun areModelsDownloaded(modelDir: File): Boolean {
