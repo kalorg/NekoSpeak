@@ -39,7 +39,7 @@ object ModelRepository {
     private const val HF_BASE_ONNX = "https://huggingface.co/Gigsu/vocoloco-onnx/resolve/main"
 
     // Les backbones fine-tunés (« voix ») ne sont plus listés ici : ils sont
-    // fournis par HfVoiceCatalog (repo HF privé michaelpruvost/narrateur-vocoloco,
+    // fournis par HfVoiceCatalog (repo HF privé pruvost/narrateur-vocoloco,
     // un dossier par voix + voice.json) et téléchargés depuis l'écran Voix.
     // Le token d'accès au repo privé est saisi dans Réglages (PrefsManager.hfToken).
     private const val BUNDLE = "onnx/french_24l"

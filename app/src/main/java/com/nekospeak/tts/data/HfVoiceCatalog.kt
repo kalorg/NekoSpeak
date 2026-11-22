@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 /**
  * Voix fine-tunée hébergée sur le repo HuggingFace privé (un dossier par voix).
  *
- * Structure côté repo (michaelpruvost/narrateur-vocoloco) :
+ * Structure côté repo (pruvost/narrateur-vocoloco) :
  *
  *   narrateur/
  *     voice.json   ← manifest de métadonnées (voir ci-dessous)
@@ -63,7 +63,7 @@ object HfVoiceCatalog {
     private const val TAG = "HfVoiceCatalog"
 
     /** Repo HF privé hébergeant les voix (un dossier par voix). */
-    const val HF_REPO_ID = "michaelpruvost/narrateur-vocoloco"
+    const val HF_REPO_ID = "pruvost/narrateur-vocoloco"
     private const val HF_API_TREE = "https://huggingface.co/api/models/$HF_REPO_ID/tree/main"
     private const val HF_RESOLVE = "https://huggingface.co/$HF_REPO_ID/resolve/main"
 
