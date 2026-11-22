@@ -78,7 +78,16 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             "omnivoice-decoder.onnx",
             "omnivoice-encoder-fixed.onnx"  // Optional — for voice cloning
         )
-        private val DATA_SHARDS = (0..4).map { "omnivoice-main.onnx_data_$it" }
+
+        // Backbone narrateur : données externes en un seul fichier (~2,4 Go),
+        // exporté par le notebook « export vocoloco » (remplace les 5 shards Gigsu)
+        private const val MAIN_DATA_FILE = "omnivoice-main.onnx_data"
+        private const val MAIN_DATA_MIN_BYTES = 1_000_000_000L
+
+        // Voix « narrateur » (LoRA fine-tuné, voix masculine FR dark fantasy) :
+        // clonée automatiquement au premier démarrage depuis la référence embarquée
+        const val NARRATEUR_VOICE_ID = "narrateur"
+        private const val NARRATEUR_REF_TEXT = "Il déambula dans les rues désertes et les jardins publics d'Agrillon, réfléchissant avec gravité aux propos de l'estropier et le maudissant, sans pouvoir néanmoins mettre cette conversation de côté."
     }
 
     // ONNX sessions
@@ -171,6 +180,9 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
             // Load persisted cloned voices from disk
             loadClonedVoices()
+
+            // Onboard la voix « narrateur » (référence embarquée clip_0733) si absente
+            ensureNarrateurVoice()
 
             initialized = true
             Log.i(TAG, "OmniVoice engine initialized successfully")
@@ -307,8 +319,8 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val clipLen = pcm.size - (pcm.size % hopLength)
                 val aligned = pcm.copyOf(clipLen)
 
-                // Run encoder
-                val inputTensor = OnnxTensor.createTensor(env, aligned)
+                // Run encoder — input_values doit être de rang (1,1,N)
+                val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
                 val result = enc.run(mapOf("input_values" to inputTensor))
 
                 // Extract audio codes [1, C, T]
@@ -318,10 +330,10 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val T = shape[2].toInt()
                 val C = shape[1].toInt()
 
-                // Reshape to [C][T]
+                // Reshape (1,C,T) -> [C][T]
                 @Suppress("UNCHECKED_CAST")
-                val codesData = codesTensor.value as Array<LongArray>
-                val tokens = Array(C) { c -> LongArray(T) { t -> codesData[c][t] } }
+                val codesData = codesTensor.value as Array<Array<LongArray>>
+                val tokens = Array(C) { c -> LongArray(T) { t -> codesData[0][c][t] } }
 
                 val durationSec = clipLen.toFloat() / SAMPLE_RATE
                 val voice = ClonedVoice(voiceName, tokens, refText = null, durationSec)
@@ -436,8 +448,9 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         val decoderFile = File(modelDir, "omnivoice-decoder.onnx")
         if (!mainFile.exists() || mainFile.length() < 1024) return false
         if (!decoderFile.exists() || decoderFile.length() < 1024) return false
-        // Check at least one data shard exists
-        return DATA_SHARDS.any { File(modelDir, it).exists() }
+        // Backbone narrateur : les poids externes en un seul fichier (~2,4 Go)
+        val dataFile = File(modelDir, MAIN_DATA_FILE)
+        return dataFile.exists() && dataFile.length() > MAIN_DATA_MIN_BYTES
     }
 
     private fun loadConfig(modelDir: File) {
@@ -619,9 +632,12 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             }
 
             // Run model inference
-            val inputIdsTensor = OnnxTensor.createTensor(env, bIds)
-            val audioMaskTensor = OnnxTensor.createTensor(env, inputs.batchAudioMask)
-            val attnTensor = OnnxTensor.createTensor(env, inputs.batchAttentionMask)
+            // Le graphe principal exige des rangs exacts : input_ids (2,C,S),
+            // audio_mask (2,S), attention_mask (2,1,S,S). Les tableaux plats 1-D
+            // étaient rejetés par ONNX Runtime (rank mismatch) — crash garanti.
+            val inputIdsTensor = OnnxTensor.createTensor(env, longTensor3D(env, bIds, 2, C, maxLen))
+            val audioMaskTensor = OnnxTensor.createTensor(env, boolTensor2D(env, inputs.batchAudioMask, 2, maxLen))
+            val attnTensor = OnnxTensor.createTensor(env, boolTensor4D(env, inputs.batchAttentionMask, 2, 1, maxLen, maxLen))
 
             val results = session.run(mapOf(
                 "input_ids" to inputIdsTensor,
@@ -795,13 +811,17 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         val codes = LongArray(C * numTargetTokens)
         System.arraycopy(tokens, 0, codes, 0, min(tokens.size, codes.size))
 
-        val codesTensor = OnnxTensor.createTensor(env, codes)
+        // Le décodeur Higgs attend audio_codes de rang (1,C,T) et sort (1,1,N)
+        val nested = Array(1) { Array(C) { c -> LongArray(numTargetTokens) } }
+        for (c in 0 until C) System.arraycopy(codes, c * numTargetTokens, nested[0][c], 0, numTargetTokens)
+        val codesTensor = OnnxTensor.createTensor(env, nested)
         val result = session.run(mapOf("audio_codes" to codesTensor))
         val audioResult = result["audio_values"] ?: return FloatArray(0)
         val audioTensor = audioResult as? OnnxTensor ?: return FloatArray(0)
 
         @Suppress("UNCHECKED_CAST")
-        return audioTensor.value as FloatArray
+        val values = audioTensor.value as Array<Array<FloatArray>>
+        return values[0][0]
     }
 
     // ========================================================================
@@ -838,6 +858,83 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     // ========================================================================
     // Internal: utilities
     // ========================================================================
+
+    /** Enveloppe un tableau plat (ordre d0-major) en tableau imbriqué int64 (d0,d1,d2). */
+    private fun longTensor3D(env: OrtEnvironment, flat: LongArray, d0: Int, d1: Int, d2: Int): Array<Array<LongArray>> {
+        val nested = Array(d0) { Array(d1) { LongArray(d2) } }
+        var idx = 0
+        for (a in 0 until d0) for (b in 0 until d1) {
+            System.arraycopy(flat, idx, nested[a][b], 0, d2)
+            idx += d2
+        }
+        return nested
+    }
+
+    /** Enveloppe un tableau plat (ordre d0-major) en tableau imbriqué bool (d0,d1). */
+    private fun boolTensor2D(env: OrtEnvironment, flat: BooleanArray, d0: Int, d1: Int): Array<BooleanArray> {
+        val nested = Array(d0) { BooleanArray(d1) }
+        for (a in 0 until d0) System.arraycopy(flat, a * d1, nested[a], 0, d1)
+        return nested
+    }
+
+    /** Enveloppe un tableau plat (ordre d0-major) en tableau imbriqué bool (d0,d1,d2,d3). */
+    private fun boolTensor4D(env: OrtEnvironment, flat: BooleanArray, d0: Int, d1: Int, d2: Int, d3: Int): Array<Array<Array<BooleanArray>>> {
+        val nested = Array(d0) { Array(d1) { Array(d2) { BooleanArray(d3) } } }
+        var idx = 0
+        for (a in 0 until d0) for (b in 0 until d1) for (c in 0 until d2) {
+            System.arraycopy(flat, idx, nested[a][b][c], 0, d3)
+            idx += d3
+        }
+        return nested
+    }
+
+    /**
+     * Onboard la voix « narrateur » : encode la référence embarquée (clip_0733,
+     * 10,3 s, la même que pendant l'entraînement LoRA) avec l'encodeur Higgs,
+     * puis la persiste comme voix clonée — elle apparaît alors dans la liste
+     * des voix aux côtés des clones utilisateur, avec son texte de référence.
+     */
+    private fun ensureNarrateurVoice() {
+        if (clonedVoices.containsKey(NARRATEUR_VOICE_ID)) return
+        val enc = encoderSession ?: run {
+            Log.w(TAG, "Encoder absent — voix narrateur non onboardée")
+            return
+        }
+        val env = ortEnv ?: return
+        try {
+            val tmp = File(context.cacheDir, "narrateur_ref.wav")
+            if (!tmp.exists() || tmp.length() == 0L) {
+                context.assets.open("narrateur_ref.wav").use { input ->
+                    tmp.writeBytes(input.readBytes())
+                }
+            }
+            val pcm = readWavAsFloat32(tmp.absolutePath)
+            if (pcm.isEmpty()) {
+                Log.e(TAG, "narrateur_ref.wav illisible — onboarding abandonné")
+                return
+            }
+            val hopLength = 960
+            val clipLen = pcm.size - (pcm.size % hopLength)
+            val aligned = pcm.copyOf(clipLen)
+
+            val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
+            val result = enc.run(mapOf("input_values" to inputTensor))
+            val codesTensor = result["audio_codes"] as? OnnxTensor ?: return
+            @Suppress("UNCHECKED_CAST")
+            val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
+            val Cb = codesData[0].size
+            val T = codesData[0][0].size
+            val tokens = Array(Cb) { c -> LongArray(T) { t -> codesData[0][c][t] } }
+
+            val durationSec = clipLen.toFloat() / SAMPLE_RATE
+            val voice = ClonedVoice(NARRATEUR_VOICE_ID, tokens, refText = NARRATEUR_REF_TEXT, durationSec)
+            clonedVoices[NARRATEUR_VOICE_ID] = voice
+            saveClonedVoice(voice)
+            Log.i(TAG, "Voix narrateur onboardée ($Cb codebooks, $T tokens, %.1fs)".format(durationSec))
+        } catch (e: Exception) {
+            Log.e(TAG, "Échec de l'onboarding narrateur", e)
+        }
+    }
 
     /** Seeded PRNG (mulberry32) for deterministic generation. */
     private fun mulberry32(seed: Int): () -> Float {
