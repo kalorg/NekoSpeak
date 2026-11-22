@@ -139,4 +139,15 @@ class PrefsManager(context: Context) {
     var hfToken: String
         get() = prefs.getString(KEY_HF_TOKEN, "") ?: ""
         set(value) = prefs.edit().putString(KEY_HF_TOKEN, value.trim()).apply()
+
+    /**
+     * Compteur incrémenté après l'installation d'une voix HF (ou tout autre
+     * événement réclamant un rechargement du moteur). Le service observe cette
+     * clé et recharge le moteur moteur en cours : sans cela, une voix
+     * téléchargée après un init raté (hfVoices vide) resterait invisible
+     * jusqu'au redémarrage de l'app.
+     */
+    var engineReloadCounter: Int
+        get() = prefs.getInt("engine_reload_counter", 0)
+        set(value) = prefs.edit().putInt("engine_reload_counter", value).apply()
 }

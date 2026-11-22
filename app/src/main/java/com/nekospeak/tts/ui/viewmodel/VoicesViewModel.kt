@@ -226,6 +226,10 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
             progressJob.cancel()
 
             if (error == null) {
+                // Le service recharge le moteur (la voix devient disponible
+                // pour la génération sans redémarrer l'app)
+                val prefs = PrefsManager(context)
+                prefs.engineReloadCounter = prefs.engineReloadCounter + 1
                 loadVoices() // rafraîchit : voix installée + onboardée au prochain init du moteur
             } else {
                 android.util.Log.e("VoicesViewModel", "Échec du téléchargement HF '${voice.id}': $error")

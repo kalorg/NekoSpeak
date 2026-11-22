@@ -462,6 +462,12 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     private fun resolveMainSession(voiceId: String?): OrtSession {
         val voice = hfVoices.firstOrNull { it.id == voiceId }
             ?: hfVoices.firstOrNull()
+            // Re-scan disque : la voix a pu être téléchargée APRÈS l'init du
+            // moteur (le service ne recharge le moteur qu'au changement de
+            // modèle). Coût négligeable : quelques checks d'existence.
+            ?: com.nekospeak.tts.data.HfVoiceCatalog.installedVoices(context)
+                .firstOrNull()
+                ?.also { hfVoices = com.nekospeak.tts.data.HfVoiceCatalog.installedVoices(context) }
             ?: throw IllegalStateException(
                 "Aucune voix fine-tunée installée — téléchargez une voix depuis l'écran Voix"
             )

@@ -102,7 +102,7 @@ class NekoTtsService : TextToSpeechService() {
 
     private val prefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
-            "current_model", "cpu_threads" -> {
+            "current_model", "cpu_threads", "engine_reload_counter" -> {
                 Log.i(TAG, "Preference '$key' changed. Reloading engine...")
                 reloadEngine()
             }

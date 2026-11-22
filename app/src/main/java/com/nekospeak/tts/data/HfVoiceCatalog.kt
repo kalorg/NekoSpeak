@@ -130,8 +130,11 @@ object HfVoiceCatalog {
         val graph = File(dir, voice.graphFile)
         val data = File(dir, voice.dataFile)
         val ref = File(dir, voice.refAudioFile)
+        // >= pour le data : les manifests HF peuvent poser dataMinBytes = taille
+        // exacte du fichier (le notebook l'écrit ainsi), et une taille égale
+        // signifie que le téléchargement est complet.
         return graph.length() > 1024 &&
-               data.length() > voice.dataMinBytes &&
+               data.length() >= voice.dataMinBytes &&
                ref.length() > 1024
     }
 
@@ -314,7 +317,9 @@ object HfVoiceCatalog {
                     voice.dataFile -> voice.dataMinBytes
                     else -> 1024L
                 }
-                if (target.exists() && target.length() > expected) {
+                if (target.exists() && target.length() >= expected) {
+                    // Reprise : fichier déjà complet (>= car le manifest HF peut
+                    // poser dataMinBytes = taille exacte du fichier)
                     done += weight
                     _downloadProgress.value = _downloadProgress.value + (voice.id to done)
                     onProgress(done)
