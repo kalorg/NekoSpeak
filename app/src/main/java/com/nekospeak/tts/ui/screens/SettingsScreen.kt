@@ -459,25 +459,25 @@ fun SettingsScreen(navController: NavController) {
                             Text("Diffusion Steps: $ovSteps", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             Button(
                                 onClick = {
-                                    ovSteps = 16
-                                    prefs.omnivoiceNumSteps = 16
+                                    ovSteps = 8
+                                    prefs.omnivoiceNumSteps = 8
                                 },
-                                enabled = ovSteps != 16
+                                enabled = ovSteps != 8
                             ) {
                                 Text("Reset")
                             }
                         }
                         Text(
-                            "More steps = better quality, slower. 8=min, 32=max. Default: 16",
+                            "More steps = better quality, slower. 4=min, 24=max. Default: 8",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Slider(
-                            value = ovSteps.toFloat(),
+                            value = ovSteps.toFloat().coerceIn(4f, 24f),
                             onValueChange = { ovSteps = it.toInt() },
                             onValueChangeFinished = { prefs.omnivoiceNumSteps = ovSteps },
-                            valueRange = 8f..32f,
-                            steps = 5
+                            valueRange = 4f..24f,
+                            steps = 9
                         )
 
                         Spacer(modifier = Modifier.height(12.dp))

@@ -120,7 +120,7 @@ class PrefsManager(context: Context) {
 
     // OmniVoice settings
     var omnivoiceNumSteps: Int
-        get() = prefs.getInt(KEY_OMNIVOICE_STEPS, 16)
+        get() = prefs.getInt(KEY_OMNIVOICE_STEPS, 8)
         set(value) = prefs.edit().putInt(KEY_OMNIVOICE_STEPS, value).apply()
 
     var omnivoiceGuidanceScale: Float
