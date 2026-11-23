@@ -218,9 +218,11 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 // 1. Resolve voice design or clone
                 val preset = voice?.let { OmniVoiceVoiceDesign.getPreset(it) }
                 val clonedVoice = voice?.let { clonedVoices[it] }
+                val hfVoice = voice?.let { id -> hfVoices.firstOrNull { it.id == id } }
 
                 val instruct = preset?.instruct  // e.g. "female, low pitch"
-                val lang = preset?.lang ?: detectLanguage(text)
+                val defaultLang = hfVoice?.language?.takeIf { it.isNotBlank() } ?: "en"
+                val lang = preset?.lang ?: detectLanguage(text, defaultLang)
                 val seed = preset?.seed ?: OmniVoiceVoiceDesign.hashInstruct(instruct)
 
                 // 2. Split text into sentences
@@ -243,10 +245,19 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                     Log.d(TAG, "Processing: \"${sentence.take(60)}...\"")
 
-                    // 3a. Estimate target token count
-                    val numTargetTokens = DurationEstimator.estimateTargetTokens(
-                        sentence, speed = speed
-                    )
+                    // 3a. Estimate target token count (using reference speaking rate when available)
+                    val numTargetTokens = if (clonedVoice != null && !clonedVoice.refText.isNullOrBlank() &&
+                        clonedVoice.tokens.isNotEmpty() && clonedVoice.tokens[0].isNotEmpty()
+                    ) {
+                        DurationEstimator.estimateTargetTokens(
+                            sentence,
+                            refText = clonedVoice.refText,
+                            numRefAudioTokens = clonedVoice.tokens[0].size,
+                            speed = speed
+                        )
+                    } else {
+                        DurationEstimator.estimateTargetTokens(sentence, speed = speed)
+                    }
                     Log.d(TAG, "Estimated tokens: $numTargetTokens")
 
                     // 3b. Tokenize style tokens: <|denoise|><|lang_start|>{lang}<|lang_end|><|instruct_start|>{instruct}<|instruct_end|>
@@ -269,6 +280,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                         inputs, mainSess, env,
                         numSteps = prefs.omnivoiceNumSteps,
                         guidanceScale = prefs.omnivoiceGuidanceScale,
+                        tShift = prefs.omnivoiceTShift,
                         seed = seed
                     )
                     if (stopRequested) {
@@ -302,7 +314,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
     override fun getSampleRate(): Int = SAMPLE_RATE
 
     override fun getVoices(): List<String> {
-        return OmniVoiceVoiceDesign.getVoiceIds() + clonedVoices.keys
+        return (OmniVoiceVoiceDesign.getVoiceIds() + hfVoices.map { it.id } + clonedVoices.keys).distinct()
     }
 
     override fun release() {
@@ -345,19 +357,19 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val aligned = pcm.copyOf(clipLen)
 
                 // Run encoder — input_values doit être de rang (1,1,N)
-                val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
-                val result = enc.run(mapOf("input_values" to inputTensor))
+                val (tokens, T) = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned))).use { inputTensor ->
+                    enc.run(mapOf("input_values" to inputTensor)).use { result ->
+                        val codesTensor = outputTensor(result, "audio_codes") ?: return@withContext null
+                        val shape = codesTensor.info.shape
+                        val tLen = shape[2].toInt()
+                        val cLen = shape[1].toInt()
 
-                // Extract audio codes [1, C, T]
-                val codesTensor = outputTensor(result, "audio_codes") ?: return@withContext null
-                val shape = codesTensor.info.shape
-                val T = shape[2].toInt()
-                val C = shape[1].toInt()
-
-                // Reshape (1,C,T) -> [C][T]
-                @Suppress("UNCHECKED_CAST")
-                val codesData = codesTensor.value as Array<Array<LongArray>>
-                val tokens = Array(C) { c -> LongArray(T) { t -> codesData[0][c][t] } }
+                        @Suppress("UNCHECKED_CAST")
+                        val codesData = codesTensor.value as Array<Array<LongArray>>
+                        val extracted = Array(cLen) { c -> LongArray(tLen) { t -> codesData[0][c][t] } }
+                        extracted to tLen
+                    }
+                }
 
                 val durationSec = clipLen.toFloat() / SAMPLE_RATE
                 val voice = ClonedVoice(voiceName, tokens, refText = null, durationSec)
@@ -554,21 +566,25 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                 val clipLen = pcm.size - (pcm.size % hopLength)
                 val aligned = pcm.copyOf(clipLen)
 
-                val inputTensor = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned)))
-                val result = enc.run(mapOf("input_values" to inputTensor))
-                val codesTensor = outputTensor(result, "audio_codes")
-                if (codesTensor == null) {
-                    com.nekospeak.tts.support.SupportLogStore.log(
-                        context, TAG,
-                        "HF onboarding: sortie 'audio_codes' absente pour '${voice.id}' (sorties encodeur: ${result.joinToString { it.key }})"
-                    )
-                    continue
-                }
-                @Suppress("UNCHECKED_CAST")
-                val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
-                val Cb = codesData[0].size
-                val T = codesData[0][0].size
-                val tokens = Array(Cb) { c -> LongArray(T) { t -> codesData[0][c][t] } }
+                val (tokens, Cb, T) = OnnxTensor.createTensor(env, arrayOf(arrayOf(aligned))).use { inputTensor ->
+                    enc.run(mapOf("input_values" to inputTensor)).use { result ->
+                        val codesTensor = outputTensor(result, "audio_codes")
+                        if (codesTensor == null) {
+                            com.nekospeak.tts.support.SupportLogStore.log(
+                                context, TAG,
+                                "HF onboarding: sortie 'audio_codes' absente pour '${voice.id}' (sorties encodeur: ${result.joinToString { it.key }})"
+                            )
+                            null
+                        } else {
+                            @Suppress("UNCHECKED_CAST")
+                            val codesData = codesTensor.value as Array<Array<LongArray>>   // (1,C,T)
+                            val cb = codesData[0].size
+                            val tLen = codesData[0][0].size
+                            val extracted = Array(cb) { c -> LongArray(tLen) { t -> codesData[0][c][t] } }
+                            Triple(extracted, cb, tLen)
+                        }
+                    }
+                } ?: continue
 
                 val durationSec = clipLen.toFloat() / SAMPLE_RATE
                 val cloned = ClonedVoice(voice.id, tokens, refText = voice.refText, durationSec)
@@ -633,7 +649,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
      * Ordre : écritures non latines (fiables, jeux de caractères disjoints),
      * puis diacritiques latins, puis mots-outils, anglais par défaut.
      */
-    private fun detectLanguage(text: String): String {
+    private fun detectLanguage(text: String, defaultLang: String = "en"): String {
         val hasKana = text.any { it.code in 0x3040..0x30FF }
         val hasHan = text.any { it.code in 0x4E00..0x9FFF }
         val hasHangul = text.any { it.code in 0xAC00..0xD7AF }
@@ -661,7 +677,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         val frenchStopwords = listOf(
             " le ", " la ", " les ", " des ", " une ", " du ", " et ", " est ",
             " dans ", " pour ", " pas ", " que ", " qui ", " au ", " ne ",
-            " l'", " d'", " qu'", " s'", " n'"
+            " l'", " d'", " qu'", " s'", " n'", " c'"
         )
         if (frenchStopwords.any { padded.contains(it) }) return "fr"
 
@@ -671,7 +687,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         )
         if (englishStopwords.any { padded.contains(it) }) return "en"
 
-        return "en" // défaut : cohérent avec le pré-entraînement de base
+        return defaultLang
     }
 
     // ========================================================================
@@ -776,6 +792,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         env: OrtEnvironment,
         numSteps: Int = DEFAULT_NUM_STEPS,
         guidanceScale: Float = DEFAULT_GUIDANCE_SCALE,
+        tShift: Float = DEFAULT_T_SHIFT,
         seed: Int = 42
     ): LongArray = withContext(Dispatchers.Default) {
         val C = numAudioCodebook
@@ -794,7 +811,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         val guidedProbs = FloatArray(V)
 
         // Get unmasking schedule
-        val timeSteps = getTimeSteps(0.0, 1.0, numSteps + 1, DEFAULT_T_SHIFT.toDouble())
+        val timeSteps = getTimeSteps(0.0, 1.0, numSteps, tShift.toDouble())
         val schedule = computeSchedule(totalPositions, numSteps, timeSteps)
 
         // Seeded PRNG for deterministic voice reproduction
@@ -821,38 +838,41 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             // Le graphe principal exige des rangs exacts : input_ids (2,C,S),
             // audio_mask (2,S), attention_mask (2,1,S,S). Les tableaux plats 1-D
             // étaient rejetés par ONNX Runtime (rank mismatch) — crash garanti.
-            val inputIdsTensor = OnnxTensor.createTensor(env, longTensor3D(env, bIds, 2, C, maxLen))
-            val audioMaskTensor = OnnxTensor.createTensor(env, boolTensor2D(env, inputs.batchAudioMask, 2, maxLen))
-            val attnTensor = OnnxTensor.createTensor(env, boolTensor4D(env, inputs.batchAttentionMask, 2, 1, maxLen, maxLen))
-
-            val results = session.run(mapOf(
-                "input_ids" to inputIdsTensor,
-                "audio_mask" to audioMaskTensor,
-                "attention_mask" to attnTensor
-            ))
-
-            val logitsTensor = outputTensor(results, "audio_logits")
-            if (logitsTensor == null) {
-                com.nekospeak.tts.support.SupportLogStore.log(
-                    context, TAG,
-                    "Diffusion: sortie 'audio_logits' absente à l'étape ${step + 1}/$numSteps (sorties: ${results.joinToString { it.key }})"
-                )
-                break
-            }
-            @Suppress("UNCHECKED_CAST")
-            val logits = logitsTensor.value as Array<Array<Array<FloatArray>>>
-            // logits shape: [2, C, maxLen, V]
-
-            // Post-process: log-softmax + CFG fusion + argmax
             val pred = IntArray(totalPositions)
             val scores = FloatArray(totalPositions)
+            var stepOk = false
 
-            cpuPostProcess(
-                logits, C, maxLen, V, numTargetTokens, inputs.targetOff,
-                audioMaskId, guidanceScale, DEFAULT_LAYER_PENALTY,
-                pred, scores,
-                condLogProbs, uncondLogProbs, guidedProbs
-            )
+            OnnxTensor.createTensor(env, longTensor3D(env, bIds, 2, C, maxLen)).use { inputIdsTensor ->
+                OnnxTensor.createTensor(env, boolTensor2D(env, inputs.batchAudioMask, 2, maxLen)).use { audioMaskTensor ->
+                    OnnxTensor.createTensor(env, boolTensor4D(env, inputs.batchAttentionMask, 2, 1, maxLen, maxLen)).use { attnTensor ->
+                        session.run(mapOf(
+                            "input_ids" to inputIdsTensor,
+                            "audio_mask" to audioMaskTensor,
+                            "attention_mask" to attnTensor
+                        )).use { results ->
+                            val logitsTensor = outputTensor(results, "audio_logits")
+                            if (logitsTensor == null) {
+                                com.nekospeak.tts.support.SupportLogStore.log(
+                                    context, TAG,
+                                    "Diffusion: sortie 'audio_logits' absente à l'étape ${step + 1}/$numSteps (sorties: ${results.joinToString { it.key }})"
+                                )
+                            } else {
+                                @Suppress("UNCHECKED_CAST")
+                                val logits = logitsTensor.value as Array<Array<Array<FloatArray>>>
+                                // logits shape: [2, C, maxLen, V]
+                                cpuPostProcess(
+                                    logits, C, maxLen, V, numTargetTokens, inputs.targetOff,
+                                    audioMaskId, guidanceScale, DEFAULT_LAYER_PENALTY,
+                                    pred, scores,
+                                    condLogProbs, uncondLogProbs, guidedProbs
+                                )
+                                stepOk = true
+                            }
+                        }
+                    }
+                }
+            }
+            if (!stepOk) break
 
             // Apply positional temperature + Gumbel noise to masked positions
             val invTemp = 1.0f / DEFAULT_POS_TEMP
@@ -1035,15 +1055,16 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
         }
 
         // Le décodeur Higgs attend audio_codes de rang (1,C,T) et sort (1,1,N)
-        val nested = Array(1) { Array(C) { c -> LongArray(numTargetTokens) } }
+        val nested = Array(1) { Array(C) { LongArray(numTargetTokens) } }
         for (c in 0 until C) System.arraycopy(codes, c * numTargetTokens, nested[0][c], 0, numTargetTokens)
-        val codesTensor = OnnxTensor.createTensor(env, nested)
-        val result = session.run(mapOf("audio_codes" to codesTensor))
-        val audioTensor = outputTensor(result, "audio_values") ?: return FloatArray(0)
-
-        @Suppress("UNCHECKED_CAST")
-        val values = audioTensor.value as Array<Array<FloatArray>>
-        return values[0][0]
+        return OnnxTensor.createTensor(env, nested).use { codesTensor ->
+            session.run(mapOf("audio_codes" to codesTensor)).use { result ->
+                val audioTensor = outputTensor(result, "audio_values") ?: return FloatArray(0)
+                @Suppress("UNCHECKED_CAST")
+                val values = audioTensor.value as Array<Array<FloatArray>>
+                values[0][0]
+            }
+        }
     }
 
     // ========================================================================
@@ -1118,34 +1139,64 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             s = (s + 0x6D2B79F5)
             var t = ((s xor (s ushr 15)) * (1 or s))
             t = (t + ((t xor (t ushr 7)) * (61 or t))) xor t
-            ((t xor (t ushr 14)) ushr 0).toFloat() / 4294967296f
+            val u = (t xor (t ushr 14)).toLong() and 0xFFFFFFFFL
+            u.toFloat() / 4294967296f
         }
     }
 
-    /** Read a WAV file as float32 PCM samples. */
+    /** Read a WAV file as mono float32 PCM samples (supports 16-bit PCM and 32-bit IEEE float). */
     private fun readWavAsFloat32(path: String): FloatArray {
         try {
             val file = File(path)
             if (!file.exists()) return FloatArray(0)
             val bytes = file.readBytes()
-            // Parse WAV header (simple: find "data" chunk)
-            var dataOffset = 12
-            while (dataOffset < bytes.size - 8) {
-                val chunkId = String(bytes, dataOffset, 4, Charsets.US_ASCII)
-                val chunkSize = ByteBuffer.wrap(bytes, dataOffset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                if (chunkId == "data") {
-                    dataOffset += 8
-                    val numSamples = chunkSize / 2  // 16-bit samples
-                    val samples = FloatArray(numSamples)
-                    for (i in 0 until numSamples) {
-                        val sampleOffset = dataOffset + i * 2
-                        if (sampleOffset + 1 >= bytes.size) break
-                        val sample = ByteBuffer.wrap(bytes, sampleOffset, 2).order(ByteOrder.LITTLE_ENDIAN).short
-                        samples[i] = sample.toFloat() / 32768f
+            if (bytes.size < 12) return FloatArray(0)
+
+            var audioFormat = 1      // 1 = PCM, 3 = IEEE float
+            var numChannels = 1
+            var bitsPerSample = 16
+
+            var offset = 12
+            while (offset <= bytes.size - 8) {
+                val chunkId = String(bytes, offset, 4, Charsets.US_ASCII)
+                val chunkSize = ByteBuffer.wrap(bytes, offset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                if (chunkSize < 0) break
+                val payloadStart = offset + 8
+                if (chunkId == "fmt " && chunkSize >= 16 && payloadStart + 16 <= bytes.size) {
+                    val fmt = ByteBuffer.wrap(bytes, payloadStart, 16).order(ByteOrder.LITTLE_ENDIAN)
+                    audioFormat = fmt.short.toInt() and 0xFFFF
+                    numChannels = (fmt.short.toInt() and 0xFFFF).coerceAtLeast(1)
+                    fmt.int // sampleRate
+                    fmt.int // byteRate
+                    fmt.short // blockAlign
+                    bitsPerSample = fmt.short.toInt() and 0xFFFF
+                } else if (chunkId == "data") {
+                    val bytesPerSample = (bitsPerSample / 8).coerceAtLeast(1)
+                    val availableBytes = min(chunkSize, bytes.size - payloadStart)
+                    val frameSize = bytesPerSample * numChannels
+                    val numFrames = availableBytes / frameSize
+                    val samples = FloatArray(numFrames)
+                    val dataBuf = ByteBuffer.wrap(bytes, payloadStart, numFrames * frameSize)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                    for (i in 0 until numFrames) {
+                        var sum = 0f
+                        for (ch in 0 until numChannels) {
+                            sum += when {
+                                audioFormat == 3 && bitsPerSample == 32 -> dataBuf.float
+                                bitsPerSample == 16 -> dataBuf.short.toFloat() / 32768f
+                                else -> {
+                                    // Unsupported bit depth: skip bytes
+                                    dataBuf.position(dataBuf.position() + bytesPerSample)
+                                    0f
+                                }
+                            }
+                        }
+                        samples[i] = sum / numChannels
                     }
                     return samples
                 }
-                dataOffset += 8 + chunkSize
+                val paddedSize = chunkSize + (chunkSize and 1)
+                offset = payloadStart + paddedSize
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read WAV: ${e.message}")

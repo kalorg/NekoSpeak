@@ -110,7 +110,7 @@ class Qwen2Tokenizer private constructor() {
     // BPE merge ranks: "token1 token2" → rank (lower = higher priority)
     private val bpeRanks = mutableMapOf<String, Int>()
     // BPE cache: input word → BPE result
-    private val bpeCache = mutableMapOf<String, String>()
+    private val bpeCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     // Special tokens
     private val specialTokens = mapOf(
         "<|denoise|>" to TOKEN_DENOOSE,
@@ -189,8 +189,9 @@ class Qwen2Tokenizer private constructor() {
         val matcher = PAT.matcher(text)
         while (matcher.find()) {
             val word = matcher.group() ?: continue
-            // Convert to byte-level representation
-            val byteEncoded = word.map { ch -> BYTE_ENCODER[ch.code] ?: ch }.joinToString("")
+            // Convert to UTF-8 bytes, then to GPT-2 byte-level unicode representation
+            val byteEncoded = word.toByteArray(Charsets.UTF_8)
+                .joinToString("") { b -> BYTE_ENCODER[b.toInt() and 0xFF]?.toString() ?: "" }
             // Apply BPE
             val bpeResult = bpe(byteEncoded)
             // Look up each BPE token in vocab
@@ -231,10 +232,10 @@ class Qwen2Tokenizer private constructor() {
         tokens.add(TOKEN_LANG_END)
 
         // Instruct marker (voice design: gender, pitch, etc.)
+        // LoRA training uses literal "None" when no instruct is provided.
         tokens.add(TOKEN_INSTRUCT_START)
-        if (instruct != null && instruct != "None") {
-            tokens.addAll(encode(instruct).toList())
-        }
+        val instructText = instruct?.takeIf { it.isNotBlank() } ?: "None"
+        tokens.addAll(encode(instructText).toList())
         tokens.add(TOKEN_INSTRUCT_END)
 
         return tokens.toLongArray()
@@ -273,22 +274,31 @@ class Qwen2Tokenizer private constructor() {
      */
     fun decode(ids: LongArray): String {
         val sb = StringBuilder()
+        val byteBuf = java.io.ByteArrayOutputStream()
+        fun flushBytes() {
+            if (byteBuf.size() > 0) {
+                sb.append(String(byteBuf.toByteArray(), Charsets.UTF_8))
+                byteBuf.reset()
+            }
+        }
         for (id in ids) {
             val token = idToToken[id] ?: continue
             if (token in specialTokens.keys) {
+                flushBytes()
                 sb.append(token)
             } else {
-                // Byte-level decode
                 for (ch in token) {
                     val byteVal = BYTE_DECODER[ch]
                     if (byteVal != null) {
-                        sb.append(byteVal.toInt().toChar())
+                        byteBuf.write(byteVal)
                     } else {
+                        flushBytes()
                         sb.append(ch)
                     }
                 }
             }
         }
+        flushBytes()
         return sb.toString()
     }
 

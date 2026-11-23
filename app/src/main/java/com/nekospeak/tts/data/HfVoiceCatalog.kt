@@ -252,6 +252,7 @@ object HfVoiceCatalog {
                 }
                 else -> {
                     Log.w(TAG, "GET $urlString → HTTP $code")
+                    connection.disconnect()
                     return null
                 }
             }
@@ -413,7 +414,7 @@ object HfVoiceCatalog {
 
         return try {
             targetDir.mkdirs()
-            if (legacyGraph.renameTo(File(targetDir, DEFAULT_GRAPH)) == null ||
+            if (!legacyGraph.renameTo(File(targetDir, DEFAULT_GRAPH)) ||
                 !File(targetDir, DEFAULT_GRAPH).exists()) {
                 // rename peut échouer sur certains appareils → copie de secours
                 legacyGraph.copyTo(File(targetDir, DEFAULT_GRAPH), overwrite = true)

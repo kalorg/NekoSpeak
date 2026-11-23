@@ -723,6 +723,7 @@ class VoicesViewModel(application: Application) : AndroidViewModel(application) 
                         if (voiceId != null) {
                             android.util.Log.i("VoicesViewModel", "Voice cloned successfully: $voiceId")
                             SupportLogStore.log(context, "VoicesViewModel", "Clone succeeded: voiceId='$voiceId'")
+                            prefs.engineReloadCounter = prefs.engineReloadCounter + 1
                             _uiState.update { it.copy(cloneErrorMessage = null) }
                         } else {
                             android.util.Log.e("VoicesViewModel", "cloneVoice returned null")

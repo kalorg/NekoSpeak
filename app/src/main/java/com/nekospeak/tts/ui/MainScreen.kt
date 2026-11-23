@@ -80,10 +80,9 @@ fun MainScreen() {
         Column(modifier = Modifier.padding(innerPadding)) {
             EngineStateBanner()
             NavHost(
-            navController = navController,
-            startDestination = startDestination,
-            modifier = Modifier.padding(innerPadding)
-        ) {
+                navController = navController,
+                startDestination = startDestination
+            ) {
             composable(Screen.Onboarding.route) {
                 OnboardingScreen(navController = navController)
             }
