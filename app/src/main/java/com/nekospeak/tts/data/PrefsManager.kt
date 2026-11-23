@@ -124,11 +124,11 @@ class PrefsManager(context: Context) {
         set(value) = prefs.edit().putInt(KEY_OMNIVOICE_STEPS, value).apply()
 
     var omnivoiceGuidanceScale: Float
-        get() = prefs.getFloat(KEY_OMNIVOICE_CFG, 3.0f)
+        get() = prefs.getFloat(KEY_OMNIVOICE_CFG, 4.0f)
         set(value) = prefs.edit().putFloat(KEY_OMNIVOICE_CFG, value).apply()
 
     var omnivoiceTShift: Float
-        get() = prefs.getFloat(KEY_OMNIVOICE_TSHIFT, 0.8f)
+        get() = prefs.getFloat(KEY_OMNIVOICE_TSHIFT, 0.05f)
         set(value) = prefs.edit().putFloat(KEY_OMNIVOICE_TSHIFT, value).apply()
 
     /**

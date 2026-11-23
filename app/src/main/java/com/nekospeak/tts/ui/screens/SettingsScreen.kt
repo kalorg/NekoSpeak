@@ -491,16 +491,16 @@ fun SettingsScreen(navController: NavController) {
                             Text("Guidance Scale: ${"%.1f".format(ovCfg)}", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             Button(
                                 onClick = {
-                                    ovCfg = 3.0f
-                                    prefs.omnivoiceGuidanceScale = 3.0f
+                                    ovCfg = 4.0f
+                                    prefs.omnivoiceGuidanceScale = 4.0f
                                 },
-                                enabled = ovCfg != 3.0f
+                                enabled = ovCfg != 4.0f
                             ) {
                                 Text("Reset")
                             }
                         }
                         Text(
-                            "Higher = more adherence to voice description. 1.5-5.0 typical. Default: 3.0",
+                            "Higher = more adherence to voice description. 1.5-5.0 typical. Default: 4.0",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -520,28 +520,27 @@ fun SettingsScreen(navController: NavController) {
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Time Shift: ${"%.1f".format(ovTShift)}", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Text("Time Shift: ${"%.2f".format(ovTShift)}", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             Button(
                                 onClick = {
-                                    ovTShift = 0.8f
-                                    prefs.omnivoiceTShift = 0.8f
+                                    ovTShift = 0.05f
+                                    prefs.omnivoiceTShift = 0.05f
                                 },
-                                enabled = ovTShift != 0.8f
+                                enabled = ovTShift != 0.05f
                             ) {
                                 Text("Reset")
                             }
                         }
                         Text(
-                            "Controls denoising schedule shape. 0.5-1.5 typical. Default: 0.8",
+                            "Controls denoising schedule shape. 0.05 recommended for OmniVoice.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Slider(
-                            value = ovTShift,
+                            value = ovTShift.coerceIn(0.01f, 1.0f),
                             onValueChange = { ovTShift = it },
                             onValueChangeFinished = { prefs.omnivoiceTShift = ovTShift },
-                            valueRange = 0.3f..1.5f,
-                            steps = 11
+                            valueRange = 0.01f..1.0f
                         )
 
                         Spacer(modifier = Modifier.height(12.dp))
