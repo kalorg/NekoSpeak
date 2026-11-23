@@ -335,6 +335,7 @@ class NekoTtsService : TextToSpeechService() {
         ).map { it.id }
 
         return if (allDefinedVoices.contains(voiceName) ||
+               com.nekospeak.tts.data.HfVoiceCatalog.isInstalled(this, voiceName) ||
                voiceName.startsWith("piper_") ||
                voiceName.startsWith("ov_") ||
                voiceName.startsWith("expr-voice-")) {

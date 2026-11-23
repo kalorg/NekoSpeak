@@ -156,10 +156,8 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             Log.i(TAG, "Tokenizer loaded")
 
             // Create session options with SIGBUS prevention
-            val opts = OrtModelLoader.createSessionOptions(threadCount = 4)
-
-            // Load main models? NO — les backbones sont chargés à la demande
-            // par voix dans resolveMainSession() (chaque voix = son backbone).
+            val threads = com.nekospeak.tts.data.PrefsManager(context).cpuThreads.coerceIn(1, 8)
+            val opts = OrtModelLoader.createSessionOptions(threadCount = threads)
 
             // Load decoder
             val decoderFile = File(modelDir, "omnivoice-decoder.onnx")
@@ -187,6 +185,15 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
             // Onboard les voix HF installées (référence + refText du manifest)
             ensureHfVoices()
+
+            // Précharger le backbone de la voix active pendant l'initialisation
+            // pour éviter ~5s de latence silencieuse à la première synthèse.
+            try {
+                val activeVoice = com.nekospeak.tts.data.PrefsManager(context).currentVoice
+                resolveMainSession(activeVoice)
+            } catch (e: Exception) {
+                Log.w(TAG, "Preload backbone skipped: ${e.message}")
+            }
 
             initialized = true
             Log.i(TAG, "OmniVoice engine initialized successfully (${hfVoices.size} HF voice(s))")
@@ -276,6 +283,7 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
 
                     // 3e. Run iterative diffusion with seeded PRNG
                     val prefs = com.nekospeak.tts.data.PrefsManager(context)
+                    val diffStartMs = System.currentTimeMillis()
                     val audioTokens = generateIterative(
                         inputs, mainSess, env,
                         numSteps = prefs.omnivoiceNumSteps,
@@ -283,22 +291,25 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
                         tShift = prefs.omnivoiceTShift,
                         seed = seed
                     )
+                    val diffMs = System.currentTimeMillis() - diffStartMs
                     if (stopRequested) {
                         com.nekospeak.tts.support.SupportLogStore.log(
                             context, TAG,
-                            "Generate: arrêt demandé après la diffusion — audio non décodé"
+                            "Generate: arrêt demandé après la diffusion (${diffMs}ms) — audio non décodé"
                         )
                         break
                     }
 
                     // 3f. Decode audio tokens to PCM
+                    val decStartMs = System.currentTimeMillis()
                     val rawPcm = decodeTokens(audioTokens, numTargetTokens, decoderSess, env)
+                    val decMs = System.currentTimeMillis() - decStartMs
 
                     // 3g. Post-process: trim silence, normalize
                     val pcm = postProcessAudio(rawPcm)
                     com.nekospeak.tts.support.SupportLogStore.log(
                         context, TAG,
-                        "Sentence: ${pcm.size} samples (${pcm.size / SAMPLE_RATE}s), tokens=$numTargetTokens"
+                        "Sentence: ${pcm.size} samples (${pcm.size / SAMPLE_RATE}s), tokens=$numTargetTokens, seq=${inputs.maxLen}, diff=${diffMs}ms, dec=${decMs}ms"
                     )
 
                     callback(pcm)
@@ -512,7 +523,8 @@ class OmniVoiceEngine(private val context: Context) : TtsEngine {
             context, TAG,
             "Loading backbone '${voice.id}' (${hfVoices.size} voix HF connues)..."
         )
-        val opts = OrtModelLoader.createSessionOptions(threadCount = 4)
+        val threads = com.nekospeak.tts.data.PrefsManager(context).cpuThreads.coerceIn(1, 8)
+        val opts = OrtModelLoader.createSessionOptions(threadCount = threads)
         val session = OrtModelLoader.loadModel(env, graphFile, opts)
         mainSessions[voice.id] = session
         Log.i(TAG, "Backbone '${voice.id}' loaded (${hfVoices.size} voice(s) installée(s))")
